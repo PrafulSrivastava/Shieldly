@@ -72,7 +72,7 @@ async def log_incident_to_hotspot(
     result = await db.execute(
         select(HotspotData).where(HotspotData.geohash == geohash)
     )
-    hotspot: HotspotData | None = result.scalar_one_or_none()
+    hotspot: HotspotData | None = result.scalars().first()
 
     if hotspot is not None:
         time_dist: dict[str, int] = dict(hotspot.time_distribution or {})

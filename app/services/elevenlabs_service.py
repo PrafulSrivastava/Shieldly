@@ -16,7 +16,7 @@ from app.config import settings
 logger = logging.getLogger(__name__)
 
 _SIGNED_URL_ENDPOINT = (
-    "https://api.elevenlabs.io/v1/convai/conversation/get_signed_url"
+    "https://api.elevenlabs.io/v1/convai/conversation/get-signed-url"
 )
 _MOCK_SIGNED_URL = "wss://mock-elevenlabs-url/conversation/mock-session-id"
 _HTTP_TIMEOUT = 10.0
@@ -38,10 +38,10 @@ async def get_signed_conversation_url(
         return _MOCK_SIGNED_URL
 
     async with httpx.AsyncClient(timeout=_HTTP_TIMEOUT) as client:
-        response = await client.post(
+        response = await client.get(
             _SIGNED_URL_ENDPOINT,
             headers={"xi-api-key": settings.elevenlabs_api_key},
-            json={"agent_id": settings.elevenlabs_agent_id},
+            params={"agent_id": settings.elevenlabs_agent_id},
         )
         response.raise_for_status()
         return response.json()["signed_url"]

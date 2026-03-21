@@ -12,7 +12,7 @@ class HotspotData(Base):
     __tablename__ = "hotspot_data"
 
     id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
-    geohash: Mapped[str] = mapped_column(String(12), nullable=False)
+    geohash: Mapped[str] = mapped_column(String(12), nullable=False, unique=True)
     incident_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     last_incident: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     # {hour_of_day (0-23): incident_count}

@@ -87,6 +87,7 @@
         .error-text { color: #ef4444; }
         .success-text { color: #10b981; }
     </style>
+    <script src="https://unpkg.com/@elevenlabs/convai-widget-embed" async type="text/javascript"></script>
 </head>
 <body class="bg-gray-100 text-gray-800 p-6 font-sans">
     <div class="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -222,10 +223,19 @@
                             <input type="text" id="lblElevenLabsUrl" readonly class="text-xs bg-gray-200 flex-1 px-2 py-1 rounded border border-gray-300 m-0">
                             <button onclick="copyUrl()" class="text-xs py-1 px-2 m-0">Copy</button>
                         </div>
-                        <div class="mt-2 text-xs">
-                            <a id="linkTestVoice" href="#" target="_blank" class="text-blue-600 underline hidden">Open raw URL in new tab</a>
-                        </div>
                     </div>
+
+                    <div id="voiceCallSection" class="hidden">
+                        <h3 class="font-bold text-sm mb-2">Voice Call:</h3>
+                        <div class="flex gap-2 items-center">
+                            <button id="btnStartCall" onclick="startVoiceCall()" style="background:#059669;">Start Voice Call</button>
+                            <button id="btnEndCall" onclick="endVoiceCall()" class="secondary" disabled>End Call</button>
+                            <span id="callStatus" class="text-xs font-bold text-gray-500 bg-gray-100 px-2 py-1 rounded border border-gray-300">Not connected</span>
+                        </div>
+                        <p class="text-xs text-gray-500 mt-2">Your browser will ask for microphone permission. Speak after the agent greets you.</p>
+                        <div id="voiceWidgetContainer" class="mt-3"></div>
+                    </div>
+
                     <div id="contextDisplay" class="hidden">
                         <h3 class="font-bold text-sm mb-1">Incident Context:</h3>
                         <pre id="lblContext" class="text-xs bg-gray-200 p-2 rounded overflow-auto max-h-32 m-0"></pre>
@@ -518,9 +528,8 @@
 
             if (res.status === 200 && res.data.signed_url) {
                 document.getElementById('lblElevenLabsUrl').value = res.data.signed_url;
-                document.getElementById('linkTestVoice').href = res.data.signed_url;
-                document.getElementById('linkTestVoice').classList.remove('hidden');
                 document.getElementById('res4').classList.remove('hidden');
+                document.getElementById('voiceCallSection').classList.remove('hidden');
             }
         }
 
@@ -548,6 +557,44 @@
             navigator.clipboard.writeText(url).then(() => {
                 alert("URL copied to clipboard!");
             });
+        }
+
+        function startVoiceCall() {
+            const signedUrl = document.getElementById('lblElevenLabsUrl').value;
+            if (!signedUrl) {
+                alert("Get the ElevenLabs token first.");
+                return;
+            }
+
+            const container = document.getElementById('voiceWidgetContainer');
+            container.innerHTML = '';
+
+            const widget = document.createElement('elevenlabs-convai');
+            widget.setAttribute('signed-url', signedUrl);
+            container.appendChild(widget);
+
+            document.getElementById('btnStartCall').disabled = true;
+            document.getElementById('btnEndCall').disabled = false;
+
+            const status = document.getElementById('callStatus');
+            status.textContent = 'Connected — speak after the agent greets you';
+            status.className = 'text-xs font-bold text-green-800 bg-green-100 px-2 py-1 rounded border border-green-300';
+
+            logOutput('VOICE', '/elevenlabs-widget', 'STARTED', 'Voice widget created with signed URL');
+        }
+
+        function endVoiceCall() {
+            const container = document.getElementById('voiceWidgetContainer');
+            container.innerHTML = '';
+
+            document.getElementById('btnStartCall').disabled = false;
+            document.getElementById('btnEndCall').disabled = true;
+
+            const status = document.getElementById('callStatus');
+            status.textContent = 'Disconnected';
+            status.className = 'text-xs font-bold text-gray-500 bg-gray-100 px-2 py-1 rounded border border-gray-300';
+
+            logOutput('VOICE', '/elevenlabs-widget', 'ENDED', 'Voice widget removed');
         }
     </script>
 </body>
