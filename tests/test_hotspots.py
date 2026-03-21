@@ -78,7 +78,9 @@ async def test_log_incident_updates_time_distribution(
     ts_23h = datetime(2026, 1, 15, 23, 0, tzinfo=timezone.utc)
 
     await log_incident_to_hotspot(_LAT, _LNG, ts_22h, db=db_session)
+    await db_session.flush()
     await log_incident_to_hotspot(_LAT, _LNG, ts_23h, db=db_session)
+    await db_session.flush()
     await log_incident_to_hotspot(_LAT, _LNG, ts_22h, db=db_session)
     await db_session.commit()
 

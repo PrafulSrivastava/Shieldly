@@ -51,6 +51,24 @@ class AllClearResponse(BaseModel):
     status: str = "resolved"
 
 
+# ── GET /incidents/{incident_id}/elevenlabs-token ─────────────────────────────
+
+class ElevenLabsTokenResponse(BaseModel):
+    signed_url: str
+    incident_id: UUID
+
+
+# ── GET /incidents/{incident_id}/context ──────────────────────────────────────
+
+class IncidentContextResponse(BaseModel):
+    shield_count: str
+    nearest_distance: str
+    nearest_eta: str
+    convergence_address: str
+    incident_status: str
+    area_safety_note: str
+
+
 # ── GET /incidents/{incident_id} ──────────────────────────────────────────────
 
 class ShieldStatusInfo(BaseModel):
@@ -59,7 +77,6 @@ class ShieldStatusInfo(BaseModel):
     status: str
     lat: float | None = None
     lng: float | None = None
-    # Walking ETA from the shield's current position to the convergence point
     eta_seconds: int | None = None
 
 

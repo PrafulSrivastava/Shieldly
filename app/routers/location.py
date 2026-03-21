@@ -21,6 +21,7 @@ from app.schemas.location import (
     ShieldLocationResponse,
     UpdateLocationRequest,
 )
+from app.services.incident_service import compute_context_update_if_needed
 from app.services.location_service import (
     get_incident_all_locations,
     update_person_location,
@@ -66,12 +67,16 @@ async def update_shield_live_location(
     active_responses = result.scalars().all()
 
     for resp in active_responses:
+        ctx = await compute_context_update_if_needed(
+            str(resp.incident_id), db=db, redis=redis,
+        )
         await update_responding_shield_location(
             incident_id=str(resp.incident_id),
             shield_id=str(shield.id),
             lat=body.lat,
             lng=body.lng,
             redis=redis,
+            context_update=ctx,
         )
 
 

@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Shieldly Testing UI</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .section { margin-bottom: 2rem; padding: 1.5rem; background: white; border-radius: 0.5rem; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+        .section h2 { font-size: 1.5rem; font-weight: bold; margin-bottom: 1rem; border-bottom: 2px solid #e5e7eb; padding-bottom: 0.5rem; }
+        .input-group { margin-bottom: 1rem; }
+        label { display: block; font-weight: bold; margin-bottom: 0.25rem; font-size: 0.875rem; color: #374151; }
+        input, select { width: 100%; padding: 0.5rem; border: 1px solid #d1d5db; border-radius: 0.375rem; font-size: 0.875rem; }
+        button { background: #3b82f6; color: white; padding: 0.5rem 1rem; border-radius: 0.375rem; font-weight: bold; cursor: pointer; transition: background 0.2s; font-size: 0.875rem; }
+        button:hover { background: #2563eb; }
+        .output-box { background: #1f2937; color: #10b981; padding: 1rem; border-radius: 0.375rem; overflow-x: auto; font-family: monospace; font-size: 0.875rem; white-space: pre-wrap; word-wrap: break-word; max-height: 400px;}
+        .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800 p-6 font-sans">
+    <div class="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-3 gap-6">
+        
+        <!-- Controls Side -->
+        <div class="lg:col-span-2 space-y-6">
+            <h1 class="text-3xl font-bold mb-4">Shieldly API Testing UI</h1>
+
+            <!-- Globals -->
+            <div class="section bg-blue-50 border border-blue-200">
+                <h2>Environment Setup</h2>
+                <div class="grid-2">
+                    <div class="input-group">
+                        <label>Base URL</label>
+                        <input type="text" id="baseUrl" value="http://localhost:8000">
+                    </div>
+                    <div class="input-group">
+                        <label>Admin API Key</label>
+                        <input type="text" id="adminKey" value="local-admin-secret">
+                    </div>
+                    <div class="input-group col-span-2">
+                        <label>Auth Token (Bearer)</label>
+                        <input type="text" id="authToken" placeholder="Paste JWT token here or login below">
+                    </div>
+                </div>
+            </div>
+
+            <!-- Dev & Seed -->
+            <div class="section">
+                <h2>1. Dev & Seed (Requires APP_ENV=development)</h2>
+                <div class="flex gap-2 flex-wrap">
+                    <button onclick="apiCall('POST', '/api/v1/dev/seed', null, false)">Seed Database</button>
+                    <button onclick="apiCall('POST', '/api/v1/dev/trigger-test-sos', null, false)">Trigger Test SOS</button>
+                </div>
+                <div class="mt-4 border-t pt-4">
+                    <h3 class="font-bold text-sm mb-2">Mock Shield Respond</h3>
+                    <div class="grid-2">
+                        <input type="text" id="mockIncidentId" placeholder="Incident ID">
+                        <input type="text" id="mockShieldId" placeholder="Shield ID">
+                    </div>
+                    <button class="mt-2" onclick="mockShieldRespond()">Simulate Response</button>
+                </div>
+            </div>
+
+            <!-- Auth -->
+            <div class="section">
+                <h2>2. Authentication</h2>
+                <div class="grid-2">
+                    <div class="input-group">
+                        <label>Firebase Token (Use phone number in dev)</label>
+                        <input type="text" id="authFirebaseToken" placeholder="+491700000001">
+                    </div>
+                    <div class="input-group">
+                        <label>Name</label>
+                        <input type="text" id="authName" value="Test User">
+                    </div>
+                    <div class="input-group">
+                        <label>Role</label>
+                        <select id="authRole">
+                            <option value="person">Person</option>
+                            <option value="shield">Shield</option>
+                        </select>
+                    </div>
+                </div>
+                <button onclick="login()">Verify Token & Login</button>
+                <p class="text-xs text-gray-500 mt-2">Successful login will automatically populate the Auth Token field above.</p>
+            </div>
+
+            <!-- Incidents -->
+            <div class="section">
+                <h2>3. Incidents (Requires Auth)</h2>
+                <div class="border p-4 rounded mb-4">
+                    <h3 class="font-bold text-sm mb-2">Trigger Real SOS</h3>
+                    <div class="grid-2 mb-2">
+                        <input type="number" id="sosLat" placeholder="Lat" value="49.1427" step="any">
+                        <input type="number" id="sosLng" placeholder="Lng" value="9.2109" step="any">
+                    </div>
+                    <button onclick="triggerSOS()">Trigger SOS</button>
+                </div>
+
+                <div class="border p-4 rounded mb-4">
+                    <h3 class="font-bold text-sm mb-2">Incident Actions</h3>
+                    <input type="text" id="incActionId" placeholder="Incident ID" class="mb-2">
+                    <div class="flex gap-2 flex-wrap">
+                        <button onclick="apiCall('GET', '/api/v1/incidents/' + document.getElementById('incActionId').value, null, true)">Get Details</button>
+                        <button onclick="apiCall('POST', '/api/v1/incidents/' + document.getElementById('incActionId').value + '/all-clear', null, true)">All Clear</button>
+                    </div>
+                </div>
+
+                <div class="border p-4 rounded">
+                    <h3 class="font-bold text-sm mb-2">Shield Respond to Incident</h3>
+                    <input type="text" id="respondIncId" placeholder="Incident ID" class="mb-2">
+                    <select id="respondAction" class="mb-2">
+                        <option value="responding">Responding</option>
+                        <option value="declined">Declined</option>
+                    </select>
+                    <button onclick="shieldRespond()">Submit Response</button>
+                </div>
+            </div>
+
+            <!-- Location -->
+            <div class="section">
+                <h2>4. Location Updates (Requires Auth)</h2>
+                <div class="grid-2 mb-2">
+                    <input type="number" id="locLat" placeholder="Lat" value="49.1430" step="any">
+                    <input type="number" id="locLng" placeholder="Lng" value="9.2115" step="any">
+                </div>
+                <div class="flex gap-2">
+                    <button onclick="updateLocation('/api/v1/location/shield')">Update Shield Location</button>
+                </div>
+                <div class="mt-4 flex gap-2">
+                    <input type="text" id="locIncId" placeholder="Incident ID">
+                    <button onclick="updateLocation('/api/v1/location/incident/' + document.getElementById('locIncId').value)">Update Incident Location</button>
+                    <button onclick="apiCall('GET', '/api/v1/location/incident/' + document.getElementById('locIncId').value + '/all', null, true)">Get Live Locations</button>
+                </div>
+            </div>
+
+            <!-- Hotspots -->
+            <div class="section">
+                <h2>5. Hotspots & Context</h2>
+                <div class="grid-2 mb-2">
+                    <input type="number" id="hotLat" placeholder="Lat" value="49.1427" step="any">
+                    <input type="number" id="hotLng" placeholder="Lng" value="9.2109" step="any">
+                </div>
+                <button onclick="getHotspotContext()">Get AI Context</button>
+            </div>
+
+            <!-- Admin -->
+            <div class="section bg-red-50 border border-red-200">
+                <h2>6. Admin Panel (Requires Admin Key)</h2>
+                <div class="flex gap-2 flex-wrap mb-4">
+                    <button class="bg-red-600 hover:bg-red-700" onclick="apiCall('GET', '/api/v1/admin/shields/pending', null, false, true)">List Pending Shields</button>
+                    <button class="bg-red-600 hover:bg-red-700" onclick="apiCall('GET', '/api/v1/admin/incidents', null, false, true)">List Incidents</button>
+                    <button class="bg-red-600 hover:bg-red-700" onclick="apiCall('GET', '/api/v1/admin/stats', null, false, true)">Stats</button>
+                </div>
+                <div class="border-t border-red-200 pt-4">
+                    <h3 class="font-bold text-sm mb-2 text-red-800">Verify Shield</h3>
+                    <div class="grid-2 mb-2">
+                        <input type="text" id="adminVerifyId" placeholder="Shield ID">
+                        <select id="adminVerifyApproved">
+                            <option value="true">Approve</option>
+                            <option value="false">Reject</option>
+                        </select>
+                    </div>
+                    <button class="bg-red-600 hover:bg-red-700" onclick="adminVerify()">Submit Verification</button>
+                </div>
+            </div>
+
+        </div>
+
+        <!-- Output Side -->
+        <div class="lg:col-span-1">
+            <div class="sticky top-6">
+                <div class="flex justify-between items-center mb-2">
+                    <h2 class="text-xl font-bold">Output Console</h2>
+                    <button class="bg-gray-500 py-1 px-2 text-xs" onclick="document.getElementById('output').textContent = ''">Clear</button>
+                </div>
+                <div id="output" class="output-box h-[80vh] overflow-y-auto"></div>
+            </div>
+        </div>
+
+    </div>
+
+    <script>
+        // Load saved state
+        document.getElementById('baseUrl').value = localStorage.getItem('baseUrl') || 'http://localhost:8000';
+        document.getElementById('adminKey').value = localStorage.getItem('adminKey') || 'local-admin-secret';
+        document.getElementById('authToken').value = localStorage.getItem('authToken') || '';
+
+        // Save state on change
+        ['baseUrl', 'adminKey', 'authToken'].forEach(id => {
+            document.getElementById(id).addEventListener('input', e => {
+                localStorage.setItem(id, e.target.value);
+            });
+        });
+
+        function logOutput(method, url, status, data) {
+            const out = document.getElementById('output');
+            const timestamp = new Date().toLocaleTimeString();
+            let msg = `[${timestamp}] ${method} ${url}\nStatus: ${status}\n\n`;
+            if (typeof data === 'object') {
+                msg += JSON.stringify(data, null, 2);
+            } else {
+                msg += data;
+            }
+            msg += '\n\n-----------------------------------\n\n';
+            out.textContent = msg + out.textContent;
+        }
+
+        async function apiCall(method, path, body = null, requireAuth = false, requireAdmin = false) {
+            const baseUrl = document.getElementById('baseUrl').value.replace(/\/$/, '');
+            const url = baseUrl + path;
+            
+            const headers = {
+                'Content-Type': 'application/json'
+            };
+
+            if (requireAuth) {
+                const token = document.getElementById('authToken').value;
+                if (!token) {
+                    alert('Auth Token required!');
+                    return;
+                }
+                headers['Authorization'] = `Bearer ${token}`;
+            }
+
+            if (requireAdmin) {
+                const key = document.getElementById('adminKey').value;
+                headers['X-Admin-Key'] = key;
+            }
+
+            const options = { method, headers };
+            if (body && (method === 'POST' || method === 'PATCH' || method === 'PUT')) {
+                options.body = JSON.stringify(body);
+            }
+
+            try {
+                const res = await fetch(url, options);
+                let data;
+                const contentType = res.headers.get('content-type');
+                if (contentType && contentType.includes('application/json')) {
+                    data = await res.json();
+                } else {
+                    data = await res.text();
+                }
+                
+                logOutput(method, path, res.status, data);
+                return { status: res.status, data };
+            } catch (err) {
+                logOutput(method, path, 'ERROR', err.message);
+            }
+        }
+
+        async function login() {
+            const body = {
+                firebase_id_token: document.getElementById('authFirebaseToken').value,
+                name: document.getElementById('authName').value,
+                role: document.getElementById('authRole').value
+            };
+            const res = await apiCall('POST', '/api/v1/auth/verify-token', body, false);
+            if (res && res.status === 200 && res.data.access_token) {
+                document.getElementById('authToken').value = res.data.access_token;
+                localStorage.setItem('authToken', res.data.access_token);
+            }
+        }
+
+        function mockShieldRespond() {
+            const iid = document.getElementById('mockIncidentId').value;
+            const sid = document.getElementById('mockShieldId').value;
+            if(!iid || !sid) return alert('Both Incident ID and Shield ID required');
+            apiCall('POST', `/api/v1/dev/mock-shield-respond/${iid}/${sid}`, null, false);
+        }
+
+        function triggerSOS() {
+            const lat = parseFloat(document.getElementById('sosLat').value);
+            const lng = parseFloat(document.getElementById('sosLng').value);
+            apiCall('POST', '/api/v1/incidents/trigger', { lat, lng }, true);
+        }
+
+        function shieldRespond() {
+            const iid = document.getElementById('respondIncId').value;
+            const action = document.getElementById('respondAction').value;
+            if(!iid) return alert('Incident ID required');
+            apiCall('POST', `/api/v1/incidents/${iid}/respond`, { action }, true);
+        }
+
+        function updateLocation(path) {
+            const lat = parseFloat(document.getElementById('locLat').value);
+            const lng = parseFloat(document.getElementById('locLng').value);
+            apiCall('PATCH', path, { lat, lng }, true);
+        }
+
+        function getHotspotContext() {
+            const lat = document.getElementById('hotLat').value;
+            const lng = document.getElementById('hotLng').value;
+            apiCall('GET', `/api/v1/hotspots/context?lat=${lat}&lng=${lng}`, null, false);
+        }
+
+        function adminVerify() {
+            const sid = document.getElementById('adminVerifyId').value;
+            const approved = document.getElementById('adminVerifyApproved').value === 'true';
+            if(!sid) return alert('Shield ID required');
+            apiCall('PATCH', `/api/v1/admin/shields/${sid}/verify`, { approved }, false, true);
+        }
+
+    </script>
+</body>
+</html>

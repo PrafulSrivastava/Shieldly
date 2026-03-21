@@ -41,6 +41,7 @@ from sqlalchemy.ext.asyncio import (
     async_sessionmaker,
     create_async_engine,
 )
+from sqlalchemy.pool import NullPool
 
 # Ensure all ORM models are registered on Base.metadata before create_all
 import app.models  # noqa: F401
@@ -86,17 +87,32 @@ async def _ensure_test_db(url: str) -> None:
         await conn.close()
 
 
+# ── Session-scoped DB bootstrap (sync), function-scoped engine ───────────────
+#
+# asyncpg connections are bound to the event loop. Session-scoped engines cause
+# "Task got Future attached to a different loop" when tests run. Use a
+# function-scoped engine so each test gets connections on its own loop.
+# The DB itself is created once per run via a module-level sync bootstrap.
+
+
 # ── Session-scoped engine ─────────────────────────────────────────────────────
+#
+# Use NullPool so connections aren't reused across event loops — avoids
+# "Task got Future attached to a different loop" with pytest-asyncio.
 
 
 @pytest_asyncio.fixture(scope="session")
 async def test_engine():
     """Create (or re-use) the test DB and build fresh tables for this run."""
     await _ensure_test_db(TEST_DATABASE_URL)
-    engine = create_async_engine(TEST_DATABASE_URL, echo=False, pool_pre_ping=True)
+    engine = create_async_engine(
+        TEST_DATABASE_URL,
+        echo=False,
+        pool_pre_ping=True,
+        poolclass=NullPool,
+    )
 
     async with engine.begin() as conn:
-        # Always start from a known-clean schema
         await conn.run_sync(Base.metadata.drop_all)
         await conn.run_sync(Base.metadata.create_all)
 
@@ -116,6 +132,28 @@ async def _clear_tables(test_engine) -> AsyncGenerator[None, None]:
     yield
 
 
+# ── Disable fire-and-forget background DB persist ─────────────────────────────
+
+
+@pytest.fixture(autouse=True)
+def _disable_background_db_persist(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Replace the background Postgres persist with a no-op.
+
+    ``update_shield_location`` fires ``asyncio.create_task`` to persist shield
+    coordinates via the production ``AsyncSessionLocal``.  In tests this engine
+    binds to a different event loop, causing "Future attached to a different
+    loop" errors during teardown.  The test DB is already written to directly
+    by ``make_shield``, so the background persist is unnecessary.
+    """
+
+    async def _noop(*_args: object, **_kwargs: object) -> None:  # noqa: ANN401
+        pass
+
+    monkeypatch.setattr(
+        "app.services.location_service._persist_shield_location_to_db", _noop
+    )
+
+
 # ── Function-scoped DB session ────────────────────────────────────────────────
 
 
@@ -128,8 +166,12 @@ async def db_session(test_engine) -> AsyncGenerator[AsyncSession, None]:
     ``_clear_tables`` fixture ensures clean state for the next test.
     """
     factory = async_sessionmaker(test_engine, expire_on_commit=False, autoflush=False)
-    async with factory() as session:
-        yield session
+    session = factory()
+    yield session
+    try:
+        await session.close()
+    except RuntimeError:
+        pass
 
 
 # ── Function-scoped fake Redis ────────────────────────────────────────────────

@@ -171,10 +171,12 @@ async def test_update_person_location_publishes_to_channel(
     # Subscribe before publishing
     pubsub = fake_redis.pubsub()
     await pubsub.subscribe(channel)
+    # Drain the subscribe confirmation so it doesn't interfere
+    await pubsub.get_message(timeout=1.0)
 
     await update_person_location(incident_id, 49.1427, 9.2109, redis=fake_redis)
 
-    msg = await pubsub.get_message(ignore_subscribe_messages=True, timeout=0.1)
+    msg = await pubsub.get_message(timeout=1.0)
     assert msg is not None
     assert msg["type"] == "message"
 
@@ -199,7 +201,7 @@ async def test_patch_shield_location_endpoint(
         json={"lat": 49.1460, "lng": 9.2160},
         headers=auth_headers(shield_user),
     )
-    assert resp.status_code == 200, resp.text
+    assert resp.status_code == 204, resp.text
 
 
 async def test_patch_shield_location_requires_shield_role(

@@ -181,12 +181,17 @@ async def update_responding_shield_location(
     lng: float,
     *,
     redis: aioredis.Redis,
+    context_update: dict[str, str] | None = None,
 ) -> None:
     """Store a responding shield's position for this incident and broadcast it.
 
     Uses a per-incident key so that a shield's movement while responding is
     visible to the person in distress without clobbering the shield's general
     location hash.
+
+    When ``context_update`` is provided (nearest-shield distance changed > 50 m),
+    it is included in the broadcast message so the frontend can call
+    ``conversation.setVariables()`` to keep ElevenLabs voice current.
     """
     now = datetime.now(timezone.utc).isoformat()
     key = _incident_shield_location_key(incident_id, shield_id)
@@ -194,16 +199,19 @@ async def update_responding_shield_location(
     await redis.hset(key, mapping={"lat": lat, "lng": lng, "updated_at": now})
     await redis.expire(key, _LOCATION_TTL)
 
-    payload = json.dumps(
-        {
-            "type": "shield_location",
+    message: dict[str, Any] = {
+        "type": "shield_location",
+        "data": {
             "shield_id": shield_id,
             "lat": lat,
             "lng": lng,
             "timestamp": now,
-        }
-    )
-    await redis.publish(_incident_updates_channel(incident_id), payload)
+        },
+    }
+    if context_update is not None:
+        message["context_update"] = context_update
+
+    await redis.publish(_incident_updates_channel(incident_id), json.dumps(message))
 
 
 async def get_active_shields_near(

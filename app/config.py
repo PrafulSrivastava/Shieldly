@@ -46,7 +46,8 @@ class Settings(BaseSettings):
     gemini_api_key: str = Field(alias="GEMINI_API_KEY")
 
     # ── ElevenLabs ─────────────────────────────────────────────────────────────
-    elevenlabs_api_key: str = Field(alias="ELEVENLABS_API_KEY")
+    elevenlabs_api_key: str = Field(default="", alias="ELEVENLABS_API_KEY")
+    elevenlabs_agent_id: str = Field(default="", alias="ELEVENLABS_AGENT_ID")
 
     # ── Admin ──────────────────────────────────────────────────────────────────
     admin_api_key: str = Field(alias="ADMIN_API_KEY")
@@ -56,6 +57,8 @@ class Settings(BaseSettings):
     mock_sms: bool = Field(default=False, alias="MOCK_SMS")
     mock_maps: bool = Field(default=False, alias="MOCK_MAPS")
     mock_gemini: bool = Field(default=False, alias="MOCK_GEMINI")
+    mock_push: bool = Field(default=False, alias="MOCK_PUSH")
+    mock_elevenlabs: bool = Field(default=True, alias="MOCK_ELEVENLABS")
 
     @property
     def is_development(self) -> bool:

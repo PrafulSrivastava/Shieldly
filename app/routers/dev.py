@@ -219,6 +219,8 @@ async def seed_database(
             current_lat=shield_lat,
             current_lng=shield_lng,
             location_updated_at=now,
+            expo_push_token=f"ExponentPushToken[SEED_SHIELD_{idx:04d}_FAKE_TOKEN]",
+            token_updated_at=now,
         )
         db.add(shield)
         await db.flush()

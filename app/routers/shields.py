@@ -1,4 +1,5 @@
 import logging
+from datetime import datetime, timezone
 
 import redis.asyncio as aioredis
 from fastapi import APIRouter, Depends, HTTPException
@@ -13,6 +14,8 @@ from app.routers.auth import get_current_user
 from app.schemas.shields import (
     ApplyShieldRequest,
     ApplyShieldResponse,
+    DeviceRegistrationRequest,
+    DeviceRegistrationResponse,
     ShieldProfileResponse,
     UpdateActiveHoursRequest,
     UpdateActiveHoursResponse,
@@ -122,3 +125,27 @@ async def get_my_profile(
     """Return the caller's shield profile, status, active hours, and verification state."""
     user, shield = user_and_shield
     return await shield_service.get_shield_profile(user, shield)
+
+
+@router.patch("/me/device", response_model=DeviceRegistrationResponse)
+async def register_device(
+    body: DeviceRegistrationRequest,
+    user_and_shield: tuple[User, Shield] = Depends(_get_current_shield),
+    db: AsyncSession = Depends(get_db),
+) -> DeviceRegistrationResponse:
+    """Register or update an Expo push token for this Shield device.
+
+    Safe to call on every app launch — idempotent upsert.
+    Only fully verified, active Shields need push tokens, but any shield role
+    user may pre-register so the token is ready when they are approved.
+    """
+    _, shield = user_and_shield
+    shield.expo_push_token = body.expo_push_token
+    shield.token_updated_at = datetime.now(timezone.utc)
+    await db.commit()
+
+    token_preview = body.expo_push_token[-8:]
+    logger.info(
+        "Shield %s registered push token (…%s)", shield.id, token_preview
+    )
+    return DeviceRegistrationResponse(registered=True, token_preview=token_preview)

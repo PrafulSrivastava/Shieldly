@@ -12,6 +12,7 @@ Coverage
 - GET /{id} → returns full incident detail
 """
 
+import json
 from uuid import uuid4
 
 import fakeredis.aioredis
@@ -54,7 +55,7 @@ async def test_trigger_sos_creates_incident_and_notifies_shields(
         json={"lat": _LAT, "lng": _LNG},
         headers=auth_headers(person),
     )
-    assert resp.status_code == 200, resp.text
+    assert resp.status_code == 201, resp.text
     data = resp.json()
     assert "incident_id" in data
     assert data["shields_notified"] >= 1
@@ -99,7 +100,7 @@ async def test_trigger_sos_with_no_nearby_shields(
         json={"lat": _LAT, "lng": _LNG},
         headers=auth_headers(person),
     )
-    assert resp.status_code == 200
+    assert resp.status_code == 201
     data = resp.json()
     assert data["shields_notified"] == 0
 
@@ -123,7 +124,7 @@ async def test_shield_respond_accepting_returns_convergence_point(
         json={"lat": _LAT, "lng": _LNG},
         headers=auth_headers(person),
     )
-    assert sos_resp.status_code == 200
+    assert sos_resp.status_code == 201
     incident_id = sos_resp.json()["incident_id"]
 
     # Shield responds
@@ -299,3 +300,240 @@ async def test_get_nonexistent_incident_returns_404(
         headers=auth_headers(person),
     )
     assert resp.status_code == 404
+
+
+# ── ElevenLabs token endpoint ────────────────────────────────────────────────
+
+
+async def test_elevenlabs_token_endpoint_mock(
+    client: AsyncClient,
+    db_session: AsyncSession,
+) -> None:
+    """MOCK_ELEVENLABS=true → returns 200 with a wss:// signed_url."""
+    person = await make_person(db_session)
+    sos_resp = await client.post(
+        "/api/v1/incidents/trigger",
+        json={"lat": _LAT, "lng": _LNG},
+        headers=auth_headers(person),
+    )
+    incident_id = sos_resp.json()["incident_id"]
+
+    resp = await client.get(
+        f"/api/v1/incidents/{incident_id}/elevenlabs-token",
+        headers=auth_headers(person),
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["signed_url"].startswith("wss://")
+    assert data["incident_id"] == incident_id
+
+
+async def test_elevenlabs_token_forbidden_for_non_owner(
+    client: AsyncClient,
+    db_session: AsyncSession,
+) -> None:
+    """A user who did not trigger the incident must receive 403."""
+    owner = await make_person(db_session, phone="+491700000020")
+    other = await make_person(db_session, phone="+491700000021")
+
+    sos_resp = await client.post(
+        "/api/v1/incidents/trigger",
+        json={"lat": _LAT, "lng": _LNG},
+        headers=auth_headers(owner),
+    )
+    incident_id = sos_resp.json()["incident_id"]
+
+    resp = await client.get(
+        f"/api/v1/incidents/{incident_id}/elevenlabs-token",
+        headers=auth_headers(other),
+    )
+    assert resp.status_code == 403
+
+
+# ── Incident context endpoint ────────────────────────────────────────────────
+
+
+async def test_context_returns_string_values_only(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    fake_redis: fakeredis.aioredis.FakeRedis,
+) -> None:
+    """Every value in the /context response must be a string — no ints, nulls, or dicts."""
+    person = await make_person(db_session)
+    shield_user, shield = await make_shield(
+        db_session, fake_redis, phone="+491700000030", lat=49.1460, lng=9.2160
+    )
+
+    sos_resp = await client.post(
+        "/api/v1/incidents/trigger",
+        json={"lat": _LAT, "lng": _LNG},
+        headers=auth_headers(person),
+    )
+    incident_id = sos_resp.json()["incident_id"]
+
+    # Shield responds so we get meaningful distances
+    await client.post(
+        f"/api/v1/incidents/{incident_id}/respond",
+        json={"action": "responding"},
+        headers=auth_headers(shield_user),
+    )
+
+    resp = await client.get(
+        f"/api/v1/incidents/{incident_id}/context",
+        headers=auth_headers(person),
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+
+    for key, value in data.items():
+        assert isinstance(value, str), f"{key} should be str, got {type(value).__name__}"
+
+    assert "metres" in data["nearest_distance"]
+    assert "minutes" in data["nearest_eta"]
+
+
+# ── WebSocket broadcast context_update ───────────────────────────────────────
+
+
+async def test_ws_broadcast_includes_context_update_on_significant_move(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    fake_redis: fakeredis.aioredis.FakeRedis,
+) -> None:
+    """Shield moves 60 m closer → context_update present.
+    Shield moves 20 m closer → context_update absent."""
+    person = await make_person(db_session)
+    shield_user, shield = await make_shield(
+        db_session, fake_redis, phone="+491700000040", lat=49.1460, lng=9.2160
+    )
+
+    sos_resp = await client.post(
+        "/api/v1/incidents/trigger",
+        json={"lat": _LAT, "lng": _LNG},
+        headers=auth_headers(person),
+    )
+    incident_id = sos_resp.json()["incident_id"]
+
+    await client.post(
+        f"/api/v1/incidents/{incident_id}/respond",
+        json={"action": "responding"},
+        headers=auth_headers(shield_user),
+    )
+
+    channel = f"shieldher:incident:{incident_id}:updates"
+    pubsub = fake_redis.pubsub()
+    await pubsub.subscribe(channel)
+    # Drain the subscribe confirmation message
+    await pubsub.get_message(timeout=1)
+
+    # Move shield significantly closer (~60 m = 0.00054 degrees lat at this lat)
+    await client.patch(
+        "/api/v1/location/shield",
+        json={"lat": 49.1454, "lng": 9.2150},
+        headers=auth_headers(shield_user),
+    )
+
+    msg = await pubsub.get_message(timeout=1)
+    assert msg is not None, "Expected broadcast after significant move"
+    payload = json.loads(msg["data"])
+    assert payload["type"] == "shield_location"
+    assert "context_update" in payload, "context_update should be present after >50m move"
+    ctx = payload["context_update"]
+    assert isinstance(ctx["shield_count"], str)
+    assert "metres" in ctx["nearest_distance"]
+
+    # Move shield only slightly (~20 m = 0.00018 degrees lat)
+    await client.patch(
+        "/api/v1/location/shield",
+        json={"lat": 49.14522, "lng": 9.2148},
+        headers=auth_headers(shield_user),
+    )
+
+    msg2 = await pubsub.get_message(timeout=1)
+    assert msg2 is not None, "Expected broadcast after small move"
+    payload2 = json.loads(msg2["data"])
+    assert "context_update" not in payload2, "context_update should NOT be present after <50m move"
+
+    await pubsub.unsubscribe(channel)
+
+
+# ── ElevenLabs E2E flow ───────────────────────────────────────────────────────
+
+
+async def test_elevenlabs_e2e_full_flow(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    fake_redis: fakeredis.aioredis.FakeRedis,
+) -> None:
+    """End-to-end: person triggers SOS → shield responds → token → context → shield moves.
+
+    Simulates the full backend flow an incident owner experiences when using
+    ElevenLabs voice during an active SOS.
+    """
+    # 1. Set up person and nearby shield
+    person = await make_person(db_session, phone="+491700000050")
+    shield_user, _ = await make_shield(
+        db_session, fake_redis, phone="+491700000051", lat=49.1460, lng=9.2160
+    )
+
+    # 2. Person triggers SOS
+    sos_resp = await client.post(
+        "/api/v1/incidents/trigger",
+        json={"lat": _LAT, "lng": _LNG},
+        headers=auth_headers(person),
+    )
+    assert sos_resp.status_code == 201
+    incident_id = sos_resp.json()["incident_id"]
+
+    # 3. Shield responds → convergence point computed
+    respond_resp = await client.post(
+        f"/api/v1/incidents/{incident_id}/respond",
+        json={"action": "responding"},
+        headers=auth_headers(shield_user),
+    )
+    assert respond_resp.status_code == 200
+
+    # 4. Person requests ElevenLabs token (incident owner only)
+    token_resp = await client.get(
+        f"/api/v1/incidents/{incident_id}/elevenlabs-token",
+        headers=auth_headers(person),
+    )
+    assert token_resp.status_code == 200
+    token_data = token_resp.json()
+    assert token_data["signed_url"].startswith("wss://")
+    assert token_data["incident_id"] == incident_id
+
+    # 5. Person fetches context for ElevenLabs dynamicVariables
+    context_resp = await client.get(
+        f"/api/v1/incidents/{incident_id}/context",
+        headers=auth_headers(person),
+    )
+    assert context_resp.status_code == 200
+    context = context_resp.json()
+    assert all(isinstance(v, str) for v in context.values())
+    assert context["incident_status"] == "active"
+    assert context["shield_count"] == "1"
+
+    # 6. Subscribe to incident updates before shield moves
+    channel = f"shieldher:incident:{incident_id}:updates"
+    pubsub = fake_redis.pubsub()
+    await pubsub.subscribe(channel)
+    await pubsub.get_message(timeout=1)  # Drain subscribe confirmation
+
+    # 7. Shield moves significantly closer (>50 m) → broadcast includes context_update
+    await client.patch(
+        "/api/v1/location/shield",
+        json={"lat": 49.1454, "lng": 9.2150},
+        headers=auth_headers(shield_user),
+    )
+
+    msg = await pubsub.get_message(timeout=1)
+    assert msg is not None
+    payload = json.loads(msg["data"])
+    assert payload["type"] == "shield_location"
+    assert "context_update" in payload
+    ctx = payload["context_update"]
+    assert ctx["incident_status"] == "active"
+    assert "metres" in ctx["nearest_distance"]
+
+    await pubsub.unsubscribe(channel)

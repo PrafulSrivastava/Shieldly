@@ -1,0 +1,554 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Shieldly E2E Flow</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .step-card {
+            background: white;
+            border-radius: 0.5rem;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            padding: 1.5rem;
+            margin-bottom: 1.5rem;
+            border-left: 4px solid #d1d5db;
+            transition: all 0.2s;
+        }
+        .step-card.active {
+            border-left-color: #3b82f6;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+        .step-card.completed {
+            border-left-color: #10b981;
+        }
+        .step-number {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 2rem;
+            height: 2rem;
+            border-radius: 9999px;
+            background: #f3f4f6;
+            color: #374151;
+            font-weight: bold;
+            margin-right: 0.75rem;
+        }
+        .active .step-number {
+            background: #3b82f6;
+            color: white;
+        }
+        .completed .step-number {
+            background: #10b981;
+            color: white;
+        }
+        input, select {
+            width: 100%;
+            padding: 0.5rem;
+            border: 1px solid #d1d5db;
+            border-radius: 0.375rem;
+            font-size: 0.875rem;
+            margin-top: 0.25rem;
+        }
+        button {
+            background: #3b82f6;
+            color: white;
+            padding: 0.5rem 1rem;
+            border-radius: 0.375rem;
+            font-weight: bold;
+            cursor: pointer;
+            transition: background 0.2s;
+            font-size: 0.875rem;
+        }
+        button:hover { background: #2563eb; }
+        button:disabled { background: #9ca3af; cursor: not-allowed; }
+        button.secondary { background: #6b7280; }
+        button.secondary:hover { background: #4b5563; }
+        .data-display {
+            background: #f8fafc;
+            border: 1px solid #e5e7eb;
+            border-radius: 0.375rem;
+            padding: 0.75rem;
+            margin-top: 1rem;
+            font-size: 0.875rem;
+        }
+        .output-box {
+            background: #1e293b;
+            color: #a7f3d0;
+            padding: 1rem;
+            border-radius: 0.375rem;
+            overflow-x: auto;
+            font-family: monospace;
+            font-size: 0.875rem;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            max-height: 80vh;
+        }
+        .error-text { color: #ef4444; }
+        .success-text { color: #10b981; }
+    </style>
+</head>
+<body class="bg-gray-100 text-gray-800 p-6 font-sans">
+    <div class="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-3 gap-6">
+        
+        <!-- Left Column: Flow -->
+        <div class="lg:col-span-2">
+            <div class="flex items-center justify-between mb-6">
+                <h1 class="text-3xl font-bold">Shieldly E2E Flow</h1>
+                <div class="flex items-center gap-2">
+                    <label class="text-sm font-bold text-gray-600">Base URL:</label>
+                    <input type="text" id="baseUrl" value="http://localhost:8000" class="w-64" style="margin-top: 0;">
+                </div>
+            </div>
+
+            <!-- Step 1: Seed -->
+            <div id="step1" class="step-card active">
+                <div class="flex items-center mb-4">
+                    <span class="step-number">1</span>
+                    <h2 class="text-xl font-bold">Seed Environment</h2>
+                </div>
+                <p class="text-sm text-gray-600 mb-4">Clears the database and creates 1 Person and 5 Shields around Heilbronn. Required for dev endpoints.</p>
+                <button id="btnSeed" onclick="runSeed()">Run Seed Database</button>
+                
+                <div id="res1" class="data-display hidden">
+                    <h3 class="font-bold text-sm mb-1">Seeded Data:</h3>
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <p class="text-xs text-gray-500">Person ID</p>
+                            <code id="lblPersonId" class="text-xs bg-gray-200 px-1 py-0.5 rounded break-all"></code>
+                        </div>
+                        <div>
+                            <p class="text-xs text-gray-500">Available Shield IDs</p>
+                            <ul id="listShields" class="text-xs space-y-1 mt-1 max-h-24 overflow-y-auto bg-gray-200 p-1 rounded"></ul>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Step 2: Trigger SOS -->
+            <div id="step2" class="step-card">
+                <div class="flex items-center mb-4">
+                    <span class="step-number">2</span>
+                    <h2 class="text-xl font-bold">Trigger Test SOS</h2>
+                </div>
+                <p class="text-sm text-gray-600 mb-4">Fires a fake SOS from the seeded Person. Refreshes shield locations automatically.</p>
+                <button id="btnSos" onclick="triggerSos()" disabled>Trigger SOS</button>
+
+                <div id="res2" class="data-display hidden">
+                    <h3 class="font-bold text-sm mb-1">Incident Created:</h3>
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <p class="text-xs text-gray-500">Incident ID</p>
+                            <code id="lblIncidentId" class="text-xs bg-green-100 text-green-800 px-1 py-0.5 rounded font-bold break-all"></code>
+                        </div>
+                        <div>
+                            <p class="text-xs text-gray-500">Shields Notified</p>
+                            <span id="lblShieldsNotified" class="font-bold">0</span>
+                        </div>
+                        <div class="col-span-2">
+                            <p class="text-xs text-gray-500">Convergence Point</p>
+                            <code id="lblSosConv" class="text-xs bg-gray-200 px-1 py-0.5 rounded"></code>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Step 3: Shield Responds -->
+            <div id="step3" class="step-card">
+                <div class="flex items-center mb-4">
+                    <span class="step-number">3</span>
+                    <h2 class="text-xl font-bold">Shield Responds</h2>
+                </div>
+                <p class="text-sm text-gray-600 mb-4">Simulates a nearby Shield accepting the request and moving towards the convergence point.</p>
+                
+                <div class="grid grid-cols-2 gap-4 mb-4">
+                    <div>
+                        <label class="text-xs text-gray-500">Incident ID</label>
+                        <input type="text" id="inputIncidentId" readonly class="bg-gray-100 cursor-not-allowed text-xs">
+                    </div>
+                    <div>
+                        <label class="text-xs text-gray-500">Select Shield</label>
+                        <select id="selectShield" class="text-xs"></select>
+                    </div>
+                </div>
+
+                <button id="btnRespond" onclick="shieldRespond()" disabled>Simulate Response</button>
+
+                <div id="res3" class="data-display hidden">
+                    <h3 class="font-bold text-sm mb-1">Movement Update:</h3>
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <p class="text-xs text-gray-500">Convergence Point</p>
+                            <code id="lblResConv" class="text-xs bg-gray-200 px-1 py-0.5 rounded"></code>
+                        </div>
+                        <div>
+                            <p class="text-xs text-gray-500">Shield Moved To</p>
+                            <code id="lblResMoved" class="text-xs bg-blue-100 text-blue-800 px-1 py-0.5 rounded"></code>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Person Auth (Shared for Steps 4 & 5) -->
+            <div class="mb-6 bg-yellow-50 border border-yellow-200 p-4 rounded-lg flex items-center justify-between">
+                <div>
+                    <h3 class="font-bold text-yellow-800">Person Authentication</h3>
+                    <p class="text-xs text-yellow-700">Auto-logged in after Seed. Re-login if needed.</p>
+                </div>
+                <div class="flex gap-2 items-center">
+                    <input type="text" id="personToken" placeholder="Auth Token (auto-set after seed)" class="text-xs w-48 mt-0" readonly>
+                    <button id="btnLogin" onclick="loginPerson()" class="secondary text-xs mt-0 py-1">Re-Login</button>
+                    <span id="authStatus" class="text-xs text-red-600 font-bold bg-red-50 px-2 py-1 rounded border border-red-200">Not Logged In</span>
+                </div>
+            </div>
+
+            <!-- Step 4: ElevenLabs Voice -->
+            <div id="step4" class="step-card">
+                <div class="flex items-center mb-4">
+                    <span class="step-number">4</span>
+                    <h2 class="text-xl font-bold">ElevenLabs Voice (Optional)</h2>
+                </div>
+                <p class="text-sm text-gray-600 mb-4">Get the secure WebSocket URL for the Conversational AI and the dynamic context variables.</p>
+                
+                <div class="flex gap-2 mb-4">
+                    <button id="btnElevenLabs" onclick="getElevenLabsToken()" disabled>1. Get ElevenLabs Token</button>
+                    <button id="btnContext" onclick="getIncidentContext()" disabled class="secondary">2. Get Incident Context</button>
+                </div>
+
+                <div id="res4" class="data-display hidden space-y-4">
+                    <div>
+                        <h3 class="font-bold text-sm mb-1">ElevenLabs Token (Signed URL):</h3>
+                        <div class="flex gap-2">
+                            <input type="text" id="lblElevenLabsUrl" readonly class="text-xs bg-gray-200 flex-1 px-2 py-1 rounded border border-gray-300 m-0">
+                            <button onclick="copyUrl()" class="text-xs py-1 px-2 m-0">Copy</button>
+                        </div>
+                        <div class="mt-2 text-xs">
+                            <a id="linkTestVoice" href="#" target="_blank" class="text-blue-600 underline hidden">Open raw URL in new tab</a>
+                        </div>
+                    </div>
+                    <div id="contextDisplay" class="hidden">
+                        <h3 class="font-bold text-sm mb-1">Incident Context:</h3>
+                        <pre id="lblContext" class="text-xs bg-gray-200 p-2 rounded overflow-auto max-h-32 m-0"></pre>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Step 5: All-Clear -->
+            <div id="step5" class="step-card">
+                <div class="flex items-center mb-4">
+                    <span class="step-number">5</span>
+                    <h2 class="text-xl font-bold">All-Clear (Resolve)</h2>
+                </div>
+                <p class="text-sm text-gray-600 mb-4">Marks the incident as resolved. Ends the SOS broadcast.</p>
+                
+                <button id="btnAllClear" onclick="allClear()" disabled>Mark Incident All-Clear</button>
+
+                <div id="res5" class="data-display hidden">
+                    <h3 class="font-bold text-sm text-green-600">✅ Incident Successfully Resolved</h3>
+                </div>
+            </div>
+
+        </div>
+
+        <!-- Right Column: Console -->
+        <div class="lg:col-span-1">
+            <div class="sticky top-6">
+                <div class="flex justify-between items-center mb-2">
+                    <h2 class="text-xl font-bold">Raw JSON Console</h2>
+                    <button class="secondary py-1 px-2 text-xs" onclick="document.getElementById('output').textContent = ''">Clear</button>
+                </div>
+                <div id="output" class="output-box">Waiting for actions...</div>
+            </div>
+        </div>
+
+    </div>
+
+    <script>
+        // State
+        let shields = [];
+        let personPhone = "+491700000001"; // From dev.py
+
+        // Load saved state
+        document.getElementById('baseUrl').value = localStorage.getItem('baseUrl') || 'http://localhost:8000';
+        document.getElementById('baseUrl').addEventListener('input', e => localStorage.setItem('baseUrl', e.target.value));
+
+        function logOutput(method, url, status, data) {
+            const out = document.getElementById('output');
+            const timestamp = new Date().toLocaleTimeString();
+            let msg = `[${timestamp}] ${method} ${url}\nStatus: ${status}\n\n`;
+            if (typeof data === 'object') {
+                msg += JSON.stringify(data, null, 2);
+            } else {
+                msg += data;
+            }
+            msg += '\n\n-----------------------------------\n\n';
+            out.textContent = msg + out.textContent;
+        }
+
+        async function apiCall(method, path, body = null, token = null) {
+            const baseUrl = document.getElementById('baseUrl').value.replace(/\/$/, '');
+            const url = baseUrl + path;
+            
+            const headers = {
+                'Content-Type': 'application/json'
+            };
+
+            if (token) {
+                headers['Authorization'] = `Bearer ${token}`;
+            }
+
+            const options = { method, headers };
+            if (body && (method === 'POST' || method === 'PATCH' || method === 'PUT')) {
+                options.body = JSON.stringify(body);
+            }
+
+            try {
+                const res = await fetch(url, options);
+                let data;
+                const contentType = res.headers.get('content-type');
+                if (contentType && contentType.includes('application/json')) {
+                    data = await res.json();
+                } else {
+                    data = await res.text();
+                }
+                
+                logOutput(method, path, res.status, data);
+                return { status: res.status, data };
+            } catch (err) {
+                logOutput(method, path, 'ERROR', err.message);
+                alert("Network error: " + err.message);
+                return { status: 0, data: null };
+            }
+        }
+
+        function setStepActive(stepNum) {
+            [1, 2, 3, 4, 5].forEach(i => {
+                const el = document.getElementById(`step${i}`);
+                if (!el) return;
+                if (i < stepNum) {
+                    el.classList.add('completed');
+                    el.classList.remove('active');
+                } else if (i === stepNum || (stepNum === 4 && i === 5)) {
+                    // Activate both 4 and 5 together since 4 is optional
+                    el.classList.add('active');
+                    el.classList.remove('completed');
+                } else {
+                    el.classList.remove('active', 'completed');
+                }
+            });
+        }
+
+        function clearAuthState() {
+            document.getElementById('personToken').value = '';
+            const status = document.getElementById('authStatus');
+            status.textContent = "Not Logged In";
+            status.className = "text-xs text-red-600 font-bold bg-red-50 px-2 py-1 rounded border border-red-200";
+            document.getElementById('btnElevenLabs').disabled = true;
+            document.getElementById('btnContext').disabled = true;
+            document.getElementById('btnAllClear').disabled = true;
+        }
+
+        async function runSeed() {
+            const btn = document.getElementById('btnSeed');
+            btn.textContent = "Seeding...";
+            btn.disabled = true;
+
+            clearAuthState();
+
+            const res = await apiCall('POST', '/api/v1/dev/seed');
+
+            if (res.status !== 200 || !res.data.seeded) {
+                btn.textContent = "Run Seed Database";
+                btn.disabled = false;
+                return;
+            }
+
+            const person = res.data.users.find(u => u.role === 'person');
+            shields = res.data.shields;
+
+            if (person) {
+                document.getElementById('lblPersonId').textContent = person.user_id;
+                personPhone = person.phone;
+            }
+
+            const list = document.getElementById('listShields');
+            const select = document.getElementById('selectShield');
+            list.innerHTML = '';
+            select.innerHTML = '';
+
+            shields.forEach(s => {
+                const li = document.createElement('li');
+                li.textContent = `Shield: ${s.shield_id}`;
+                list.appendChild(li);
+
+                const opt = document.createElement('option');
+                opt.value = s.shield_id;
+                opt.textContent = `${s.name} (${s.shield_id.substring(0,8)}...)`;
+                select.appendChild(opt);
+            });
+
+            document.getElementById('res1').classList.remove('hidden');
+
+            // Auto-login the freshly seeded person so the JWT matches
+            btn.textContent = "Logging in Person...";
+            await loginPerson();
+
+            btn.textContent = "Run Seed Database";
+            btn.disabled = false;
+            document.getElementById('btnSos').disabled = false;
+            setStepActive(2);
+        }
+
+        async function triggerSos() {
+            const btn = document.getElementById('btnSos');
+            btn.textContent = "Triggering...";
+            btn.disabled = true;
+
+            const res = await apiCall('POST', '/api/v1/dev/trigger-test-sos');
+            btn.textContent = "Trigger SOS";
+            btn.disabled = false;
+
+            if (res.status === 200 || res.status === 201) {
+                const d = res.data;
+                document.getElementById('lblIncidentId').textContent = d.incident_id;
+                document.getElementById('lblShieldsNotified').textContent = d.shields_notified;
+                document.getElementById('lblSosConv').textContent = d.convergence_point ? `${d.convergence_point.lat}, ${d.convergence_point.lng}` : 'N/A';
+                
+                // Pass to step 3
+                document.getElementById('inputIncidentId').value = d.incident_id;
+                document.getElementById('res2').classList.remove('hidden');
+                document.getElementById('btnRespond').disabled = false;
+                setStepActive(3);
+            }
+        }
+
+        async function shieldRespond() {
+            const btn = document.getElementById('btnRespond');
+            btn.textContent = "Simulating...";
+            btn.disabled = true;
+
+            const iid = document.getElementById('inputIncidentId').value;
+            const sid = document.getElementById('selectShield').value;
+
+            const res = await apiCall('POST', `/api/v1/dev/mock-shield-respond/${iid}/${sid}`);
+            btn.textContent = "Simulate Response";
+            btn.disabled = false;
+
+            if (res.status === 200) {
+                const d = res.data;
+                document.getElementById('lblResConv').textContent = d.convergence_point ? `${d.convergence_point.lat}, ${d.convergence_point.lng}` : 'N/A';
+                document.getElementById('lblResMoved').textContent = d.shield_moved_to ? `${d.shield_moved_to.lat}, ${d.shield_moved_to.lng}` : 'N/A';
+
+                document.getElementById('res3').classList.remove('hidden');
+                
+                const hasToken = !!document.getElementById('personToken').value;
+                document.getElementById('btnElevenLabs').disabled = !hasToken;
+                document.getElementById('btnContext').disabled = !hasToken;
+                document.getElementById('btnAllClear').disabled = !hasToken;
+
+                setStepActive(4);
+            }
+        }
+
+        async function loginPerson() {
+            const btn = document.getElementById('btnLogin');
+            const prevText = btn.textContent;
+            btn.textContent = "Logging in...";
+            
+            const body = {
+                firebase_id_token: personPhone,
+                name: "Test Person",
+                role: "person"
+            };
+
+            const res = await apiCall('POST', '/api/v1/auth/verify-token', body);
+            btn.textContent = prevText;
+
+            if (res.status === 200 && res.data.access_token) {
+                document.getElementById('personToken').value = res.data.access_token;
+                const status = document.getElementById('authStatus');
+                status.textContent = `Logged In (${res.data.user_id.substring(0,8)}...)`;
+                status.className = "text-xs text-green-800 font-bold bg-green-100 px-2 py-1 rounded border border-green-300";
+                
+                const hasIncident = !!document.getElementById('inputIncidentId').value;
+                if (hasIncident) {
+                    document.getElementById('btnElevenLabs').disabled = false;
+                    document.getElementById('btnContext').disabled = false;
+                    document.getElementById('btnAllClear').disabled = false;
+                }
+                return true;
+            }
+            logOutput('AUTH', '/login', 'FAILED', 'Could not auto-login the seeded person. Try clicking Re-Login after seed.');
+            return false;
+        }
+
+        async function allClear() {
+            const btn = document.getElementById('btnAllClear');
+            btn.textContent = "Processing...";
+            btn.disabled = true;
+
+            const iid = document.getElementById('inputIncidentId').value;
+            const token = document.getElementById('personToken').value;
+
+            const res = await apiCall('POST', `/api/v1/incidents/${iid}/all-clear`, null, token);
+            btn.textContent = "Mark Incident All-Clear";
+            
+            if (res.status === 200) {
+                document.getElementById('res5').classList.remove('hidden');
+                document.getElementById('step4').classList.add('completed');
+                document.getElementById('step4').classList.remove('active');
+                document.getElementById('step5').classList.add('completed');
+                document.getElementById('step5').classList.remove('active');
+            } else {
+                btn.disabled = false;
+            }
+        }
+
+        async function getElevenLabsToken() {
+            const btn = document.getElementById('btnElevenLabs');
+            btn.textContent = "Getting Token...";
+            btn.disabled = true;
+
+            const iid = document.getElementById('inputIncidentId').value;
+            const token = document.getElementById('personToken').value;
+
+            const res = await apiCall('GET', `/api/v1/incidents/${iid}/elevenlabs-token`, null, token);
+            btn.textContent = "1. Get ElevenLabs Token";
+            btn.disabled = false;
+
+            if (res.status === 200 && res.data.signed_url) {
+                document.getElementById('lblElevenLabsUrl').value = res.data.signed_url;
+                document.getElementById('linkTestVoice').href = res.data.signed_url;
+                document.getElementById('linkTestVoice').classList.remove('hidden');
+                document.getElementById('res4').classList.remove('hidden');
+            }
+        }
+
+        async function getIncidentContext() {
+            const btn = document.getElementById('btnContext');
+            btn.textContent = "Getting Context...";
+            btn.disabled = true;
+
+            const iid = document.getElementById('inputIncidentId').value;
+            const token = document.getElementById('personToken').value;
+
+            const res = await apiCall('GET', `/api/v1/incidents/${iid}/context`, null, token);
+            btn.textContent = "2. Get Incident Context";
+            btn.disabled = false;
+
+            if (res.status === 200) {
+                document.getElementById('lblContext').textContent = JSON.stringify(res.data, null, 2);
+                document.getElementById('contextDisplay').classList.remove('hidden');
+                document.getElementById('res4').classList.remove('hidden');
+            }
+        }
+
+        function copyUrl() {
+            const url = document.getElementById('lblElevenLabsUrl').value;
+            navigator.clipboard.writeText(url).then(() => {
+                alert("URL copied to clipboard!");
+            });
+        }
+    </script>
+</body>
+</html>

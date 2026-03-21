@@ -62,6 +62,36 @@ MOCK_GEMINI_RESPONSES = [
 # Pick deterministically based on geohash to keep demo consistent
 ```
 
+### MOCK_PUSH=true
+Log the push notification to stdout with `[MOCK PUSH]` prefix. Never makes an
+HTTP call to Expo. Returns `True` so the SOS flow proceeds as if delivered.
+```python
+logger.info(
+    "[MOCK PUSH → …%s | shield=%s] %s: %s | data=%s",
+    token[-8:],   # last 8 chars only — never log the full token
+    shield_id,
+    title,
+    body,
+    data,
+)
+return True
+```
+Default for local dev (`MOCK_PUSH=true` in `.env`). Set `MOCK_PUSH=false` to
+send real Expo push notifications (requires shields to have registered tokens).
+
+### MOCK_ELEVENLABS=true
+Return a hardcoded `wss://` mock URL without calling the ElevenLabs API.
+Used for local dev and tests — no real ElevenLabs conversation session is created.
+```python
+_MOCK_SIGNED_URL = "wss://mock-elevenlabs-url/conversation/mock-session-id"
+
+if settings.mock_elevenlabs:
+    logger.info("[MOCK ELEVENLABS] Returning mock signed URL for incident %s", incident_id)
+    return _MOCK_SIGNED_URL
+```
+Default is `MOCK_ELEVENLABS=true`. Set to `false` to get real signed URLs from
+the ElevenLabs API (requires valid `ELEVENLABS_API_KEY` and `ELEVENLABS_AGENT_ID`).
+
 ## Dev Endpoint Rules
 Dev endpoints are ONLY mounted when `APP_ENV=development`. Add this guard in `main.py`:
 

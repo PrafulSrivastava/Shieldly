@@ -56,3 +56,19 @@ class ShieldProfileResponse(BaseModel):
     commitment_signed: bool
     active_hours_start: str | None
     active_hours_end: str | None
+
+
+class DeviceRegistrationRequest(BaseModel):
+    expo_push_token: str
+
+    @field_validator("expo_push_token")
+    @classmethod
+    def validate_expo_token(cls, v: str) -> str:
+        if not v.startswith("ExponentPushToken["):
+            raise ValueError("Must be a valid Expo push token")
+        return v
+
+
+class DeviceRegistrationResponse(BaseModel):
+    registered: bool
+    token_preview: str  # last 8 chars only — never return the full token

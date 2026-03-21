@@ -24,6 +24,7 @@ from app.models.shields import Shield
 from app.models.users import User
 from app.schemas.incidents import (
     ConvergencePoint,
+    IncidentContextResponse,
     IncidentDetailResponse,
     RespondingShieldInfo,
     RespondToIncidentResponse,
@@ -121,9 +122,11 @@ async def trigger_sos(
                 data={
                     "type": "sos_alert",
                     "incident_id": str(incident.id),
-                    "lat": lat,
-                    "lng": lng,
+                    "lat": incident.trigger_lat,
+                    "lng": incident.trigger_lng,
+                    "distance_km": round(s["distance_km"], 2),
                 },
+                db=db,
             )
             for s in nearby
         ],
@@ -310,6 +313,7 @@ async def resolve_incident(
                 title="She is safe",
                 body="She is safe — thank you",
                 data={"type": "resolved", "incident_id": str(incident_id)},
+                db=db,
             )
             for resp in responding
         ],
@@ -439,7 +443,204 @@ async def get_incident_detail(
     )
 
 
+async def get_incident_context(
+    incident_id: UUID,
+    *,
+    db: AsyncSession,
+    redis: aioredis.Redis,
+    skip_gemini: bool = False,
+) -> IncidentContextResponse:
+    """Build the flat string-valued context dict ElevenLabs dynamicVariables expects.
+
+    Every value is a human-readable string — no ints, no nulls, no nested objects.
+    """
+    result = await db.execute(select(Incident).where(Incident.id == incident_id))
+    incident: Incident | None = result.scalar_one_or_none()
+    if incident is None:
+        raise HTTPException(status_code=404, detail="Incident not found")
+
+    conv_lat = incident.convergence_lat or incident.trigger_lat
+    conv_lng = incident.convergence_lng or incident.trigger_lng
+
+    rows = (
+        await db.execute(
+            select(IncidentResponse, Shield)
+            .join(Shield, IncidentResponse.shield_id == Shield.id)
+            .where(
+                IncidentResponse.incident_id == incident_id,
+                IncidentResponse.status == ResponseStatus.responding,
+            )
+        )
+    ).all()
+
+    responding_count = len(rows)
+    nearest_distance_m: float | None = None
+    nearest_eta_seconds: int | None = None
+
+    for inc_resp, shield_obj in rows:
+        s_lat, s_lng = await _resolve_shield_position(
+            redis,
+            incident_id=str(incident_id),
+            shield_id=str(shield_obj.id),
+            fallback_lat=shield_obj.current_lat,
+            fallback_lng=shield_obj.current_lng,
+        )
+        if s_lat is None or s_lng is None:
+            continue
+
+        dist_m = haversine_distance(s_lat, s_lng, conv_lat, conv_lng) * 1000.0
+        if nearest_distance_m is None or dist_m < nearest_distance_m:
+            nearest_distance_m = dist_m
+            try:
+                nearest_eta_seconds = await navigation_service.get_eta_seconds(
+                    s_lat, s_lng, conv_lat, conv_lng
+                )
+            except Exception:
+                logger.exception("ETA computation failed for context")
+                nearest_eta_seconds = None
+
+    area_safety_note = ""
+    if not skip_gemini:
+        try:
+            from app.services import hotspot_service
+
+            area_safety_note = await hotspot_service.get_gemini_safety_context(
+                incident.trigger_lat, incident.trigger_lng, db=db
+            )
+        except Exception:
+            logger.exception("Gemini safety context failed for incident %s", incident_id)
+
+    convergence_address = "your convergence point"
+    if incident.convergence_lat is not None:
+        convergence_address = f"{incident.convergence_lat:.4f}, {incident.convergence_lng:.4f}"
+
+    return IncidentContextResponse(
+        shield_count=str(responding_count),
+        nearest_distance=(
+            f"{round(nearest_distance_m)} metres"
+            if nearest_distance_m is not None
+            else "unknown distance"
+        ),
+        nearest_eta=(
+            f"{round(nearest_eta_seconds / 60)} minutes"
+            if nearest_eta_seconds is not None
+            else "a few minutes"
+        ),
+        convergence_address=convergence_address,
+        incident_status=incident.status.value,
+        area_safety_note=area_safety_note,
+    )
+
+
+_CONTEXT_UPDATE_THRESHOLD_M = 50.0
+
+
+def _nearest_distance_key(incident_id: str) -> str:
+    return f"shieldher:incident:{incident_id}:last_nearest_m"
+
+
+async def compute_context_update_if_needed(
+    incident_id: str,
+    *,
+    db: AsyncSession,
+    redis: aioredis.Redis,
+) -> dict[str, str] | None:
+    """Recompute nearest-shield distance and return a context dict if it changed > 50 m.
+
+    Returns ``None`` when the change is below threshold (no broadcast needed).
+    Stores the new nearest distance in Redis for subsequent comparisons.
+    """
+    result = await db.execute(
+        select(Incident).where(Incident.id == UUID(incident_id))
+    )
+    incident: Incident | None = result.scalar_one_or_none()
+    if incident is None or incident.status != IncidentStatus.active:
+        return None
+
+    conv_lat = incident.convergence_lat or incident.trigger_lat
+    conv_lng = incident.convergence_lng or incident.trigger_lng
+
+    responding = (
+        await db.execute(
+            select(IncidentResponse, Shield)
+            .join(Shield, IncidentResponse.shield_id == Shield.id)
+            .where(
+                IncidentResponse.incident_id == UUID(incident_id),
+                IncidentResponse.status == ResponseStatus.responding,
+            )
+        )
+    ).all()
+
+    nearest_m: float | None = None
+    nearest_eta_s: int | None = None
+    for inc_resp, shield_obj in responding:
+        s_lat, s_lng = await _resolve_shield_position(
+            redis,
+            incident_id=incident_id,
+            shield_id=str(shield_obj.id),
+            fallback_lat=shield_obj.current_lat,
+            fallback_lng=shield_obj.current_lng,
+        )
+        if s_lat is None or s_lng is None:
+            continue
+        dist_m = haversine_distance(s_lat, s_lng, conv_lat, conv_lng) * 1000.0
+        if nearest_m is None or dist_m < nearest_m:
+            nearest_m = dist_m
+
+    if nearest_m is None:
+        return None
+
+    prev_raw: bytes | str | None = await redis.get(_nearest_distance_key(incident_id))
+    prev_nearest: float | None = float(prev_raw) if prev_raw else None
+
+    await redis.set(
+        _nearest_distance_key(incident_id),
+        str(nearest_m),
+        ex=_INCIDENT_STATE_TTL,
+    )
+
+    if prev_nearest is not None and abs(prev_nearest - nearest_m) <= _CONTEXT_UPDATE_THRESHOLD_M:
+        return None
+
+    # Threshold exceeded — compute lightweight context (skip Gemini for speed)
+    if nearest_m is not None:
+        nearest_eta_s = max(1, int(nearest_m / 1.4))  # Haversine-based, no API
+
+    convergence_address = "your convergence point"
+    if incident.convergence_lat is not None:
+        convergence_address = f"{incident.convergence_lat:.4f}, {incident.convergence_lng:.4f}"
+
+    return {
+        "shield_count": str(len(responding)),
+        "nearest_distance": f"{round(nearest_m)} metres",
+        "nearest_eta": (
+            f"{round(nearest_eta_s / 60)} minutes"
+            if nearest_eta_s is not None
+            else "a few minutes"
+        ),
+        "convergence_address": convergence_address,
+        "incident_status": incident.status.value,
+        "area_safety_note": "",
+    }
+
+
 # ── Internal helpers ──────────────────────────────────────────────────────────
+
+async def require_incident_owner(
+    incident_id: UUID,
+    user: User,
+    *,
+    db: AsyncSession,
+) -> Incident:
+    """Load an incident and verify the requesting user owns it.  Raises 404/403."""
+    result = await db.execute(select(Incident).where(Incident.id == incident_id))
+    incident: Incident | None = result.scalar_one_or_none()
+    if incident is None:
+        raise HTTPException(status_code=404, detail="Incident not found")
+    if incident.triggered_by != user.id:
+        raise HTTPException(status_code=403, detail="Not the incident owner")
+    return incident
+
 
 async def _require_active_incident(db: AsyncSession, incident_id: UUID) -> Incident:
     result = await db.execute(select(Incident).where(Incident.id == incident_id))
@@ -534,6 +735,7 @@ async def _send_covered_notifications(
                 title="Covered",
                 body="Enough Shields are responding — you're off the hook. Thank you!",
                 data={"type": "covered", "incident_id": str(incident_id)},
+                db=db,
             )
             for resp in notified
         ],

@@ -145,14 +145,14 @@ async def test_authenticated_request_identifies_correct_user(
     """Bearer token must resolve to the right User via get_current_user."""
     user = await make_person(db_session, phone="+491700000020")
 
-    # Hit any authenticated endpoint — /api/v1/shields/me gives a 404 because
-    # this user has no shield profile, which means auth succeeded but the
-    # resource lookup failed (expected).
+    # Hit an authenticated endpoint that only requires get_current_user (no
+    # role check).  A non-existent incident returns 404, proving auth passed.
     resp = await client.get(
-        "/api/v1/shields/me", headers=auth_headers(user)
+        "/api/v1/incidents/00000000-0000-0000-0000-000000000000",
+        headers=auth_headers(user),
     )
     # 404 means the auth layer passed (401/403 would mean auth failed)
-    assert resp.status_code not in (401, 403)
+    assert resp.status_code == 404
 
 
 async def test_inactive_user_token_returns_401(

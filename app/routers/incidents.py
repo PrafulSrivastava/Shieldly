@@ -4,6 +4,8 @@ POST /trigger               person triggers SOS
 POST /{id}/respond          shield accepts or declines
 POST /{id}/all-clear        person marks incident resolved
 GET  /{id}                  full incident state + ETAs
+GET  /{id}/elevenlabs-token signed URL for ElevenLabs Conversational AI
+GET  /{id}/context          flat string context for ElevenLabs dynamicVariables
 """
 
 import logging
@@ -20,6 +22,8 @@ from app.redis_client import get_redis
 from app.routers.auth import get_current_user, require_shield
 from app.schemas.incidents import (
     AllClearResponse,
+    ElevenLabsTokenResponse,
+    IncidentContextResponse,
     IncidentDetailResponse,
     RespondToIncidentRequest,
     RespondToIncidentResponse,
@@ -27,6 +31,7 @@ from app.schemas.incidents import (
     TriggerSOSResponse,
 )
 from app.services import incident_service
+from app.services.elevenlabs_service import get_signed_conversation_url
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +61,7 @@ async def trigger_sos(
 
 @router.post(
     "/{incident_id}/respond",
+    response_model=None,
     responses={
         200: {"model": RespondToIncidentResponse, "description": "Shield is responding"},
         204: {"description": "Shield declined — no body"},
@@ -124,5 +130,45 @@ async def get_incident(
     Requires: authenticated user (person or shield).
     """
     return await incident_service.get_incident_detail(
+        incident_id, db=db, redis=redis
+    )
+
+
+@router.get(
+    "/{incident_id}/elevenlabs-token",
+    response_model=ElevenLabsTokenResponse,
+)
+async def get_elevenlabs_token(
+    incident_id: UUID,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> ElevenLabsTokenResponse:
+    """Issue a short-lived signed URL for the ElevenLabs Conversational AI SDK.
+
+    Only the incident owner may request a token.  The API key never leaves
+    the server — the frontend receives only the signed WebSocket URL.
+    """
+    incident = await incident_service.require_incident_owner(incident_id, user, db=db)
+    signed_url = await get_signed_conversation_url(incident.id, db)
+    return ElevenLabsTokenResponse(signed_url=signed_url, incident_id=incident.id)
+
+
+@router.get(
+    "/{incident_id}/context",
+    response_model=IncidentContextResponse,
+)
+async def get_incident_context(
+    incident_id: UUID,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    redis: aioredis.Redis = Depends(get_redis),
+) -> IncidentContextResponse:
+    """Return live incident data shaped for ElevenLabs dynamicVariables.
+
+    All values are human-readable strings — no nested objects, no numbers,
+    no nulls.  The frontend passes this dict directly to
+    ``conversation.setVariables()``.
+    """
+    return await incident_service.get_incident_context(
         incident_id, db=db, redis=redis
     )

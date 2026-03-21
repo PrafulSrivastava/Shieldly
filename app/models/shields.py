@@ -2,7 +2,7 @@ import enum
 from datetime import datetime, time
 from uuid import UUID, uuid4
 
-from sqlalchemy import Boolean, DateTime, Enum as SAEnum, Float, ForeignKey, Index, Time
+from sqlalchemy import Boolean, DateTime, Enum as SAEnum, Float, ForeignKey, Index, String, Time
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
@@ -32,6 +32,9 @@ class Shield(Base):
     current_lat: Mapped[float | None] = mapped_column(Float, nullable=True)
     current_lng: Mapped[float | None] = mapped_column(Float, nullable=True)
     location_updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+    expo_push_token: Mapped[str | None] = mapped_column(String, nullable=True)
+    token_updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     # Relationships
     user: Mapped["User"] = relationship(  # type: ignore[name-defined]  # noqa: F821
