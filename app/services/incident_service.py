@@ -269,8 +269,8 @@ async def resolve_incident(
     db: AsyncSession,
     redis: aioredis.Redis,
     background_tasks: BackgroundTasks,
-) -> None:
-    """Mark the incident resolved.
+) -> str | None:
+    """Mark the incident resolved and return a zone safety summary (or None).
 
     Steps:
       1. Validate ownership + active status
@@ -278,7 +278,8 @@ async def resolve_incident(
       3. Push 'she is safe' to all responding shields
       4. Enqueue SMS to emergency contact
       5. Upsert hotspot bucket (geohash + hour-of-day)
-      6. Clear Redis incident cache
+      6. Fetch zone summary from Gemini for the incident location
+      7. Clear Redis incident cache
     """
     result = await db.execute(select(Incident).where(Incident.id == incident_id))
     incident: Incident | None = result.scalar_one_or_none()
@@ -331,12 +332,24 @@ async def resolve_incident(
     # Hotspot logging
     await _increment_hotspot(db, lat=incident.trigger_lat, lng=incident.trigger_lng, now=now)
 
+    # Zone summary (Gemini, 3-second timeout — silent fallback)
+    zone_summary: str | None = None
+    try:
+        zone_data = await hotspot_service.get_zone_summary(
+            incident.trigger_lat, incident.trigger_lng, db=db
+        )
+        zone_summary = zone_data.get("summary")
+    except Exception:
+        logger.exception("Zone summary failed for incident %s", incident_id)
+
     # Clear Redis incident state + person location cache
     await asyncio.gather(
         redis.delete(_state_key(incident_id)),
         redis.delete(_incident_person_loc_key(str(incident_id))),
         return_exceptions=True,
     )
+
+    return zone_summary
 
 
 async def get_incident_detail(

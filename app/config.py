@@ -44,6 +44,7 @@ class Settings(BaseSettings):
 
     # ── Gemini ─────────────────────────────────────────────────────────────────
     gemini_api_key: str = Field(alias="GEMINI_API_KEY")
+    gemini_model: str = Field(default="gemini-1.5-flash", alias="GEMINI_MODEL")
 
     # ── ElevenLabs ─────────────────────────────────────────────────────────────
     elevenlabs_api_key: str = Field(default="", alias="ELEVENLABS_API_KEY")

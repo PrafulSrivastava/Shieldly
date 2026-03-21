@@ -101,18 +101,20 @@ async def all_clear(
     """Person marks the incident resolved.
 
     Notifies responding Shields, sends SMS to the emergency contact, logs the
-    hotspot bucket, and clears the Redis incident cache.
+    hotspot bucket, and clears the Redis incident cache.  If Gemini returns a
+    zone safety summary for the incident location it is included as
+    ``zone_summary`` in the response.
 
     Requires role: **person** (must be the incident owner).
     """
-    await incident_service.resolve_incident(
+    zone_summary = await incident_service.resolve_incident(
         user,
         incident_id,
         db=db,
         redis=redis,
         background_tasks=background_tasks,
     )
-    return AllClearResponse()
+    return AllClearResponse(zone_summary=zone_summary)
 
 
 @router.get("/{incident_id}", response_model=IncidentDetailResponse)

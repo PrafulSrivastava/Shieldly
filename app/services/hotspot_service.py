@@ -8,7 +8,7 @@ precision-7 (~150 m) write used during incident resolution.
 """
 
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Literal
 
 import httpx
@@ -23,14 +23,16 @@ from app.utils.geo import encode_geohash, geohash_neighbors
 logger = logging.getLogger(__name__)
 
 _GEOHASH_PRECISION = 6
+_ZONE_SUMMARY_TIMEOUT = 3.0
 _MOCK_GEMINI_RESPONSE = (
     "This area has seen some recent activity; consider walking on "
     "well-lit streets and staying alert, especially during late-night hours."
 )
-_GEMINI_URL = (
-    "https://generativelanguage.googleapis.com/v1beta/models/"
-    "gemini-1.5-flash:generateContent"
-)
+_GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/models/"
+
+
+def _gemini_url() -> str:
+    return f"{_GEMINI_BASE_URL}{settings.gemini_model}:generateContent"
 
 
 # ── Internal helpers ──────────────────────────────────────────────────────────
@@ -191,7 +193,7 @@ async def get_gemini_safety_context(
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
             resp = await client.post(
-                _GEMINI_URL,
+                _gemini_url(),
                 params={"key": settings.gemini_api_key},
                 json={"contents": [{"parts": [{"text": prompt}]}]},
             )
@@ -203,3 +205,113 @@ async def get_gemini_safety_context(
             "Gemini API call failed for hotspot context at (%.6f, %.6f)", lat, lng
         )
         return "Exercise normal caution in this area and stay aware of your surroundings."
+
+
+# ── Zone summary (single-cell lookup + Gemini) ──────────────────────────────
+
+
+def _relative_time(dt: datetime) -> str:
+    """Human-readable relative time, e.g. '3 weeks ago'."""
+    now = datetime.now(timezone.utc)
+    delta = now - (dt.replace(tzinfo=timezone.utc) if dt.tzinfo is None else dt)
+    days = max(0, delta.days)
+    if days == 0:
+        return "today"
+    if days == 1:
+        return "yesterday"
+    if days < 7:
+        return f"{days} days ago"
+    weeks = days // 7
+    if weeks < 5:
+        return f"{weeks} week{'s' if weeks != 1 else ''} ago"
+    months = days // 30
+    return f"{months} month{'s' if months != 1 else ''} ago"
+
+
+def _readable_time_distribution(td: dict[str, int]) -> str:
+    """Convert hour→count map to readable string like 'mostly between 10 pm and midnight'."""
+    if not td:
+        return "no clear pattern"
+    sorted_hours = sorted(td.items(), key=lambda kv: kv[1], reverse=True)
+    top_hours = [int(h) for h, _ in sorted_hours[:3]]
+    top_hours.sort()
+    if not top_hours:
+        return "no clear pattern"
+
+    def _fmt(h: int) -> str:
+        if h == 0:
+            return "midnight"
+        if h == 12:
+            return "noon"
+        return f"{h % 12} {'am' if h < 12 else 'pm'}"
+
+    lo, hi = top_hours[0], (top_hours[-1] + 1) % 24
+    return f"mostly between {_fmt(lo)} and {_fmt(hi)}"
+
+
+async def get_zone_summary(
+    lat: float,
+    lng: float,
+    *,
+    db: AsyncSession,
+) -> dict[str, Any]:
+    """Single-cell hotspot lookup + Gemini one-sentence summary.
+
+    Returns ``{"summary": str | None, "incident_count": int | None,
+    "last_incident": datetime | None}``.  On Gemini failure or insufficient
+    data the summary is ``None``.
+    """
+    geohash = encode_geohash(lat, lng, precision=_GEOHASH_PRECISION)
+    result = await db.execute(
+        select(HotspotData).where(HotspotData.geohash == geohash)
+    )
+    hotspot: HotspotData | None = result.scalars().first()
+
+    if hotspot is None or hotspot.incident_count < 2:
+        return {"summary": None, "incident_count": None, "last_incident": None}
+
+    last_incident_relative = (
+        _relative_time(hotspot.last_incident) if hotspot.last_incident else "unknown"
+    )
+    time_dist_text = _readable_time_distribution(hotspot.time_distribution or {})
+    current_hour = datetime.now(timezone.utc).hour
+
+    prompt = (
+        "You are a safety assistant in a women's safety app. Write one calm, "
+        "factual sentence summarising safety context for a user entering this "
+        "area. Do not be alarmist. Do not mention specific street names.\n\n"
+        "Data:\n"
+        f"- incident_count: {hotspot.incident_count}\n"
+        f"- last_incident: {last_incident_relative}\n"
+        f"- time_distribution: {time_dist_text}\n"
+        f"- current_hour: {current_hour}"
+    )
+
+    if settings.mock_gemini:
+        return {
+            "summary": _MOCK_GEMINI_RESPONSE,
+            "incident_count": hotspot.incident_count,
+            "last_incident": hotspot.last_incident,
+        }
+
+    try:
+        async with httpx.AsyncClient(timeout=_ZONE_SUMMARY_TIMEOUT) as client:
+            resp = await client.post(
+                _gemini_url(),
+                params={"key": settings.gemini_api_key},
+                json={"contents": [{"parts": [{"text": prompt}]}]},
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            summary_text = data["candidates"][0]["content"]["parts"][0]["text"].strip()
+    except Exception:
+        logger.exception(
+            "Gemini zone-summary call failed for (%.6f, %.6f)", lat, lng
+        )
+        return {"summary": None, "incident_count": None, "last_incident": None}
+
+    return {
+        "summary": summary_text,
+        "incident_count": hotspot.incident_count,
+        "last_incident": hotspot.last_incident,
+    }

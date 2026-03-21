@@ -49,6 +49,7 @@ class RespondToIncidentResponse(BaseModel):
 
 class AllClearResponse(BaseModel):
     status: str = "resolved"
+    zone_summary: str | None = None
 
 
 # ── GET /incidents/{incident_id}/elevenlabs-token ─────────────────────────────
