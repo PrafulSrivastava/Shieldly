@@ -86,6 +86,60 @@
         }
         .error-text { color: #ef4444; }
         .success-text { color: #10b981; }
+        /* Zone warning banner */
+        .zone-banner {
+            position: fixed;
+            top: 1rem;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 9999;
+            background: #fef3c7;
+            border: 1px solid #f59e0b;
+            border-radius: 0.5rem;
+            padding: 0.75rem 1.25rem;
+            max-width: 36rem;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            cursor: pointer;
+            animation: slideDown 0.3s ease-out;
+        }
+        .zone-banner .banner-label {
+            font-size: 0.7rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: #92400e;
+            margin-bottom: 0.25rem;
+        }
+        .zone-banner .banner-text {
+            font-size: 0.85rem;
+            color: #78350f;
+            line-height: 1.4;
+        }
+        @keyframes slideDown {
+            from { opacity: 0; transform: translateX(-50%) translateY(-1rem); }
+            to   { opacity: 1; transform: translateX(-50%) translateY(0); }
+        }
+        /* Post-incident zone card */
+        .zone-info-card {
+            background: #f0f9ff;
+            border: 1px solid #bae6fd;
+            border-radius: 0.5rem;
+            padding: 1rem;
+            margin-top: 1rem;
+        }
+        .zone-info-card .card-label {
+            font-size: 0.7rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: #0369a1;
+            margin-bottom: 0.35rem;
+        }
+        .zone-info-card .card-text {
+            font-size: 0.875rem;
+            color: #0c4a6e;
+            line-height: 1.5;
+        }
     </style>
     <script src="https://unpkg.com/@elevenlabs/convai-widget-embed" async type="text/javascript"></script>
 </head>
@@ -96,7 +150,9 @@
         <div class="lg:col-span-2">
             <div class="flex items-center justify-between mb-6">
                 <h1 class="text-3xl font-bold">Shieldly E2E Flow</h1>
-                <div class="flex items-center gap-2">
+                <div class="flex items-center gap-3">
+                    <button id="btnWatcher" onclick="toggleLocationWatcher()" class="secondary text-xs py-1 px-3" style="margin-top:0;">Start Zone Watch</button>
+                    <span id="watcherStatus" class="text-xs text-gray-500">GPS off</span>
                     <label class="text-sm font-bold text-gray-600">Base URL:</label>
                     <input type="text" id="baseUrl" value="http://localhost:8000" class="w-64" style="margin-top: 0;">
                 </div>
@@ -255,6 +311,96 @@
 
                 <div id="res5" class="data-display hidden">
                     <h3 class="font-bold text-sm text-green-600">✅ Incident Successfully Resolved</h3>
+                    <div id="zoneSummaryCard" class="zone-info-card hidden">
+                        <div class="card-label">About this area</div>
+                        <div id="zoneSummaryText" class="card-text"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Step 6: Hotspot & Zone Testing -->
+            <div id="step6" class="step-card" style="border-left-color:#f59e0b;">
+                <div class="flex items-center mb-4">
+                    <span class="step-number" style="background:#f59e0b;color:#fff;">6</span>
+                    <h2 class="text-xl font-bold">Hotspot &amp; Zone Testing</h2>
+                </div>
+                <p class="text-sm text-gray-600 mb-4">
+                    Seed fake hotspot data, query the <code>/hotspots/summary</code> and
+                    <code>/hotspots/context</code> endpoints, and simulate a location walk
+                    that triggers zone warning banners.
+                </p>
+                <p class="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded p-2 mb-4">
+                    <strong>Note:</strong> Step 1 (“Run Seed Database”) creates users in <strong>Heilbronn</strong> and logs a few historical incidents there — it does <strong>not</strong> fill the Stuttgart cells used in 6c. Run <strong>6a — Seed Stuttgart Route Hotspots</strong> before the simulated walk. Banners also need a non-null <code>summary</code> from the API (set <code>MOCK_GEMINI=true</code> locally, or a working Gemini key — otherwise failed Gemini calls return no summary).
+                </p>
+
+                <!-- 6a: Seed -->
+                <div class="mb-4">
+                    <h3 class="font-bold text-sm mb-2">6a — Seed Hotspot Data</h3>
+                    <p class="text-xs text-gray-500 mb-2">
+                        Inserts 4 fake incidents (counts 2–4, hours 21–23) along a Stuttgart walking route.
+                        Idempotent — safe to click repeatedly.
+                    </p>
+                    <button id="btnSeedHotspots" onclick="seedHotspots()">Seed Stuttgart Route Hotspots</button>
+                    <div id="resSeedHotspots" class="data-display hidden mt-2">
+                        <h3 class="font-bold text-sm mb-1 text-green-700">Seeded Cells:</h3>
+                        <pre id="lblSeedHotspots" class="text-xs bg-gray-200 p-2 rounded overflow-auto max-h-32 m-0"></pre>
+                    </div>
+                </div>
+
+                <hr class="my-4 border-gray-200">
+
+                <!-- 6b: Manual query -->
+                <div class="mb-4">
+                    <h3 class="font-bold text-sm mb-2">6b — Query Hotspot Summary</h3>
+                    <div class="grid grid-cols-3 gap-3 mb-3">
+                        <div>
+                            <label class="text-xs text-gray-500">Preset</label>
+                            <select id="selectPreset" onchange="applyPreset()" class="text-xs">
+                                <option value="">— Custom —</option>
+                                <option value="48.7092,9.1041" selected>Stuttgart Start (48.7092, 9.1041)</option>
+                                <option value="48.7085,9.1055">Stuttgart Mid (48.7085, 9.1055)</option>
+                                <option value="48.7078,9.1063">Stuttgart End (48.7078, 9.1063)</option>
+                                <option value="49.1427,9.2109">Heilbronn Centre (49.1427, 9.2109)</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="text-xs text-gray-500">Latitude</label>
+                            <input type="number" id="inputHotLat" step="0.0001" value="48.7092" class="text-xs">
+                        </div>
+                        <div>
+                            <label class="text-xs text-gray-500">Longitude</label>
+                            <input type="number" id="inputHotLng" step="0.0001" value="9.1041" class="text-xs">
+                        </div>
+                    </div>
+                    <p class="text-xs text-gray-400 mb-3" id="lblGeohash">Geohash-6: <code>—</code></p>
+                    <div class="flex gap-2 mb-3">
+                        <button id="btnQuerySummary" onclick="querySummary()">Query Summary</button>
+                        <button id="btnQueryContext" onclick="queryContext()" class="secondary">Query Full Context</button>
+                    </div>
+                    <div id="resQuery" class="data-display hidden">
+                        <h3 class="font-bold text-sm mb-1" id="lblQueryTitle">Response:</h3>
+                        <pre id="lblQueryResult" class="text-xs bg-gray-200 p-2 rounded overflow-auto max-h-40 m-0"></pre>
+                    </div>
+                </div>
+
+                <hr class="my-4 border-gray-200">
+
+                <!-- 6c: Simulated walk -->
+                <div class="mb-4">
+                    <h3 class="font-bold text-sm mb-2">6c — Simulate Walk</h3>
+                    <p class="text-xs text-gray-500 mb-2">
+                        Walks through the 3 Stuttgart waypoints (2 s interval), calling
+                        <code>/hotspots/summary</code> for each. Triggers an amber zone banner
+                        whenever the backend returns a summary.
+                    </p>
+                    <div class="flex gap-2 items-center">
+                        <button id="btnSimWalk" onclick="simulateWalk()">Start Simulated Walk</button>
+                        <button id="btnTestBanner" onclick="showZoneBanner('This area has seen a few incidents mostly in the late evening hours. Stay alert and consider well-lit routes.')" class="secondary">Preview Banner</button>
+                        <button onclick="seenGeohashes.clear(); logOutput('ZONE','clear-seen','OK','Session geohash set cleared')" class="secondary text-xs py-1 px-2">Clear Seen Zones</button>
+                    </div>
+                    <div id="resSimWalk" class="hidden mt-3">
+                        <div class="space-y-2" id="walkLog"></div>
+                    </div>
                 </div>
             </div>
 
@@ -339,13 +485,13 @@
                     el.classList.add('completed');
                     el.classList.remove('active');
                 } else if (i === stepNum || (stepNum === 4 && i === 5)) {
-                    // Activate both 4 and 5 together since 4 is optional
                     el.classList.add('active');
                     el.classList.remove('completed');
                 } else {
                     el.classList.remove('active', 'completed');
                 }
             });
+            // Step 6 is always-accessible, not part of the linear flow
         }
 
         function clearAuthState() {
@@ -509,6 +655,11 @@
                 document.getElementById('step4').classList.remove('active');
                 document.getElementById('step5').classList.add('completed');
                 document.getElementById('step5').classList.remove('active');
+
+                if (res.data && res.data.zone_summary) {
+                    document.getElementById('zoneSummaryText').textContent = res.data.zone_summary;
+                    document.getElementById('zoneSummaryCard').classList.remove('hidden');
+                }
             } else {
                 btn.disabled = false;
             }
@@ -595,6 +746,250 @@
             status.className = 'text-xs font-bold text-gray-500 bg-gray-100 px-2 py-1 rounded border border-gray-300';
 
             logOutput('VOICE', '/elevenlabs-widget', 'ENDED', 'Voice widget removed');
+        }
+
+        // ── Shared geo / banner utilities (used by Step 6 and location watcher) ──
+
+        const seenGeohashes = new Set();
+        let activeBanner = null;
+
+        function haversineM(lat1, lng1, lat2, lng2) {
+            const R = 6371000;
+            const dLat = (lat2 - lat1) * Math.PI / 180;
+            const dLng = (lng2 - lng1) * Math.PI / 180;
+            const a = Math.sin(dLat/2)**2 +
+                      Math.cos(lat1 * Math.PI/180) * Math.cos(lat2 * Math.PI/180) *
+                      Math.sin(dLng/2)**2;
+            return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+        }
+
+        function simpleGeohash6(lat, lng) {
+            const BASE32 = '0123456789bcdefghjkmnpqrstuvwxyz';
+            let latRange = [-90, 90], lngRange = [-180, 180];
+            let even = true, bits = [16,8,4,2,1], bi = 0, ch = 0, hash = '';
+            while (hash.length < 6) {
+                if (even) {
+                    const mid = (lngRange[0] + lngRange[1]) / 2;
+                    if (lng >= mid) { ch |= bits[bi]; lngRange[0] = mid; } else { lngRange[1] = mid; }
+                } else {
+                    const mid = (latRange[0] + latRange[1]) / 2;
+                    if (lat >= mid) { ch |= bits[bi]; latRange[0] = mid; } else { latRange[1] = mid; }
+                }
+                even = !even;
+                bi++;
+                if (bi === 5) { hash += BASE32[ch]; bi = 0; ch = 0; }
+            }
+            return hash;
+        }
+
+        function showZoneBanner(text) {
+            dismissZoneBanner();
+            const banner = document.createElement('div');
+            banner.className = 'zone-banner';
+            banner.innerHTML = `<div class="banner-label">Zone alert</div><div class="banner-text">${text}</div>`;
+            banner.addEventListener('click', dismissZoneBanner);
+            document.body.appendChild(banner);
+            activeBanner = banner;
+            setTimeout(dismissZoneBanner, 8000);
+        }
+
+        function dismissZoneBanner() {
+            if (activeBanner && activeBanner.parentNode) {
+                activeBanner.parentNode.removeChild(activeBanner);
+            }
+            activeBanner = null;
+        }
+
+        // ── Step 6: Hotspot & Zone Testing ───────────────────────────────
+
+        function updateGeohashLabel() {
+            const lat = parseFloat(document.getElementById('inputHotLat').value);
+            const lng = parseFloat(document.getElementById('inputHotLng').value);
+            const el = document.getElementById('lblGeohash');
+            if (isNaN(lat) || isNaN(lng)) { el.innerHTML = 'Geohash-6: <code>invalid</code>'; return; }
+            const gh = simpleGeohash6(lat, lng);
+            el.innerHTML = `Geohash-6: <code class="bg-gray-200 px-1 rounded">${gh}</code>`;
+        }
+
+        document.getElementById('inputHotLat').addEventListener('input', updateGeohashLabel);
+        document.getElementById('inputHotLng').addEventListener('input', updateGeohashLabel);
+
+        function applyPreset() {
+            const val = document.getElementById('selectPreset').value;
+            if (!val) return;
+            const [lat, lng] = val.split(',');
+            document.getElementById('inputHotLat').value = lat;
+            document.getElementById('inputHotLng').value = lng;
+            updateGeohashLabel();
+        }
+
+        async function seedHotspots() {
+            const btn = document.getElementById('btnSeedHotspots');
+            btn.textContent = 'Seeding...';
+            btn.disabled = true;
+
+            const res = await apiCall('POST', '/api/v1/dev/seed-hotspots');
+            btn.textContent = 'Seed Stuttgart Route Hotspots';
+            btn.disabled = false;
+
+            if (res.status === 200 && res.data && res.data.seeded) {
+                document.getElementById('lblSeedHotspots').textContent = JSON.stringify(res.data.cells, null, 2);
+                document.getElementById('resSeedHotspots').classList.remove('hidden');
+            }
+        }
+
+        async function querySummary() {
+            const lat = document.getElementById('inputHotLat').value;
+            const lng = document.getElementById('inputHotLng').value;
+            const token = document.getElementById('personToken').value;
+            if (!token) { alert('Login first (Step 1 → Seed)'); return; }
+
+            const btn = document.getElementById('btnQuerySummary');
+            btn.textContent = 'Querying...';
+            btn.disabled = true;
+
+            const res = await apiCall('GET', `/api/v1/hotspots/summary?lat=${lat}&lng=${lng}`, null, token);
+            btn.textContent = 'Query Summary';
+            btn.disabled = false;
+
+            document.getElementById('lblQueryTitle').textContent = 'Summary Response:';
+            document.getElementById('lblQueryResult').textContent = JSON.stringify(res.data, null, 2);
+            document.getElementById('resQuery').classList.remove('hidden');
+        }
+
+        async function queryContext() {
+            const lat = document.getElementById('inputHotLat').value;
+            const lng = document.getElementById('inputHotLng').value;
+            const token = document.getElementById('personToken').value;
+            if (!token) { alert('Login first (Step 1 → Seed)'); return; }
+
+            const btn = document.getElementById('btnQueryContext');
+            btn.textContent = 'Querying...';
+            btn.disabled = true;
+
+            const res = await apiCall('GET', `/api/v1/hotspots/context?lat=${lat}&lng=${lng}`, null, token);
+            btn.textContent = 'Query Full Context';
+            btn.disabled = false;
+
+            document.getElementById('lblQueryTitle').textContent = 'Full Context Response:';
+            document.getElementById('lblQueryResult').textContent = JSON.stringify(res.data, null, 2);
+            document.getElementById('resQuery').classList.remove('hidden');
+        }
+
+        const WALK_WAYPOINTS = [
+            { name: 'Start',    lat: 48.7092, lng: 9.1041 },
+            { name: 'Midpoint', lat: 48.7085, lng: 9.1055 },
+            { name: 'End',      lat: 48.7078, lng: 9.1063 },
+        ];
+
+        async function simulateWalk() {
+            const token = document.getElementById('personToken').value;
+            if (!token) { alert('Login first (Step 1 → Seed)'); return; }
+
+            const btn = document.getElementById('btnSimWalk');
+            btn.textContent = 'Walking...';
+            btn.disabled = true;
+
+            const log = document.getElementById('walkLog');
+            log.innerHTML = '';
+            document.getElementById('resSimWalk').classList.remove('hidden');
+
+            for (let i = 0; i < WALK_WAYPOINTS.length; i++) {
+                const wp = WALK_WAYPOINTS[i];
+                const gh = simpleGeohash6(wp.lat, wp.lng);
+
+                const entry = document.createElement('div');
+                entry.className = 'flex items-start gap-2 text-xs';
+                entry.innerHTML = `<span class="font-bold text-blue-700 whitespace-nowrap">${wp.name}</span>
+                    <span class="text-gray-500">(${wp.lat}, ${wp.lng})</span>
+                    <code class="bg-gray-200 px-1 rounded">${gh}</code>
+                    <span id="walkStatus${i}" class="font-bold text-gray-400">querying...</span>`;
+                log.appendChild(entry);
+
+                const res = await apiCall('GET', `/api/v1/hotspots/summary?lat=${wp.lat}&lng=${wp.lng}`, null, token);
+                const status = document.getElementById(`walkStatus${i}`);
+
+                if (res.status === 200 && res.data && res.data.summary) {
+                    status.textContent = `✓ ${res.data.incident_count} incidents — banner shown`;
+                    status.className = 'font-bold text-amber-700';
+                    if (!seenGeohashes.has(gh)) {
+                        seenGeohashes.add(gh);
+                        showZoneBanner(res.data.summary);
+                    } else {
+                        status.textContent += ' (deduped)';
+                    }
+                } else {
+                    status.textContent = res.data && res.data.summary === null ? 'no data / < 2 incidents' : `error ${res.status}`;
+                    status.className = 'font-bold text-gray-500';
+                }
+
+                if (i < WALK_WAYPOINTS.length - 1) {
+                    await new Promise(r => setTimeout(r, 2000));
+                }
+            }
+
+            btn.textContent = 'Start Simulated Walk';
+            btn.disabled = false;
+        }
+
+        // Init geohash label on load
+        setTimeout(updateGeohashLabel, 0);
+
+        // ── Zone warning location watcher ─────────────────────────────────
+
+        let watcherId = null;
+        let lastCheckedLat = null;
+        let lastCheckedLng = null;
+
+        async function onPositionUpdate(pos) {
+            const lat = pos.coords.latitude;
+            const lng = pos.coords.longitude;
+            const ws = document.getElementById('watcherStatus');
+            ws.textContent = `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
+
+            if (lastCheckedLat !== null && haversineM(lastCheckedLat, lastCheckedLng, lat, lng) < 100) {
+                return;
+            }
+            lastCheckedLat = lat;
+            lastCheckedLng = lng;
+
+            const gh = simpleGeohash6(lat, lng);
+            if (seenGeohashes.has(gh)) return;
+
+            const token = document.getElementById('personToken').value;
+            if (!token) return;
+
+            const res = await apiCall('GET', `/api/v1/hotspots/summary?lat=${lat}&lng=${lng}`, null, token);
+            if (res.status === 200 && res.data && res.data.summary) {
+                seenGeohashes.add(gh);
+                showZoneBanner(res.data.summary);
+            }
+        }
+
+        function toggleLocationWatcher() {
+            const btn = document.getElementById('btnWatcher');
+            const ws = document.getElementById('watcherStatus');
+            if (watcherId !== null) {
+                navigator.geolocation.clearWatch(watcherId);
+                watcherId = null;
+                btn.textContent = 'Start Zone Watch';
+                btn.classList.add('secondary');
+                ws.textContent = 'GPS off';
+                return;
+            }
+            if (!navigator.geolocation) {
+                alert('Geolocation not supported');
+                return;
+            }
+            watcherId = navigator.geolocation.watchPosition(
+                onPositionUpdate,
+                err => { ws.textContent = 'GPS error: ' + err.message; },
+                { enableHighAccuracy: true, maximumAge: 5000 }
+            );
+            btn.textContent = 'Stop Zone Watch';
+            btn.classList.remove('secondary');
+            btn.style.background = '#059669';
+            ws.textContent = 'Acquiring GPS...';
         }
     </script>
 </body>

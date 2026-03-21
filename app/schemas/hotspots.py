@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import Literal
 
 from pydantic import BaseModel, Field
@@ -15,4 +16,19 @@ class HotspotContextResponse(BaseModel):
     )
     shield_count_nearby: int = Field(
         description="Number of active, verified Shields within 1 km"
+    )
+
+
+class HotspotSummaryResponse(BaseModel):
+    summary: str | None = Field(
+        default=None,
+        description="Gemini-generated one-sentence safety context, or null if insufficient data",
+    )
+    incident_count: int | None = Field(
+        default=None,
+        description="Number of incidents recorded in this geohash cell",
+    )
+    last_incident: datetime | None = Field(
+        default=None,
+        description="Timestamp of the most recent incident in this cell",
     )

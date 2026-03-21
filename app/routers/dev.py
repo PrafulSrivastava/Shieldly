@@ -102,6 +102,17 @@ class TestSMSResponse(BaseModel):
     mock_mode: bool
 
 
+class SeedHotspotCell(BaseModel):
+    geohash: str
+    incident_count: int
+    time_distribution: dict[str, int]
+
+
+class SeedHotspotsResponse(BaseModel):
+    seeded: bool
+    cells: list[SeedHotspotCell]
+
+
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
 
@@ -427,3 +438,81 @@ async def send_test_sms(
         to=body.to,
         mock_mode=settings.mock_sms,
     )
+
+
+# ── Stuttgart route hotspot seed ───────────────────────────────────────────
+
+_ROUTE_INCIDENTS: list[dict] = [
+    {"lat": 48.7092, "lng": 9.1041, "count": 3, "days_ago": 8,  "hours": {21: 1, 22: 1, 23: 1}},
+    {"lat": 48.7089, "lng": 9.1048, "count": 4, "days_ago": 14, "hours": {21: 2, 22: 1, 23: 1}},
+    {"lat": 48.7085, "lng": 9.1055, "count": 2, "days_ago": 33, "hours": {22: 1, 23: 1}},
+    {"lat": 48.7078, "lng": 9.1063, "count": 3, "days_ago": 51, "hours": {21: 1, 22: 2}},
+]
+
+
+@router.post(
+    "/dev/seed-hotspots",
+    response_model=SeedHotspotsResponse,
+    summary="Seed Stuttgart-route hotspot data",
+    description=(
+        "Idempotent seed: deletes existing rows for the target geohash cells, "
+        "then inserts 4 fake historical incidents along a Stuttgart walking route "
+        "(48.7092,9.1041 → 48.7078,9.1063). Counts range 2–4, times concentrated "
+        "in hours 21–23. **Development only.**"
+    ),
+)
+async def seed_hotspots(
+    db: AsyncSession = Depends(get_db),
+) -> SeedHotspotsResponse:
+    from datetime import timedelta
+    from sqlalchemy.orm.attributes import flag_modified
+
+    target_geohashes: set[str] = set()
+    for inc in _ROUTE_INCIDENTS:
+        target_geohashes.add(encode_geohash(inc["lat"], inc["lng"], precision=6))
+
+    await db.execute(
+        delete(HotspotData).where(HotspotData.geohash.in_(list(target_geohashes)))
+    )
+
+    now = datetime.now(timezone.utc)
+    rows_by_gh: dict[str, HotspotData] = {}
+
+    for inc in _ROUTE_INCIDENTS:
+        gh = encode_geohash(inc["lat"], inc["lng"], precision=6)
+        last = now - timedelta(days=inc["days_ago"], hours=random.randint(0, 5))
+
+        if gh in rows_by_gh:
+            row = rows_by_gh[gh]
+            row.incident_count += inc["count"]
+            if last > row.last_incident:
+                row.last_incident = last
+            td: dict[str, int] = dict(row.time_distribution or {})
+            for h, c in inc["hours"].items():
+                td[str(h)] = td.get(str(h), 0) + c
+            row.time_distribution = td
+            flag_modified(row, "time_distribution")
+        else:
+            rows_by_gh[gh] = HotspotData(
+                geohash=gh,
+                incident_count=inc["count"],
+                last_incident=last,
+                time_distribution={str(h): c for h, c in inc["hours"].items()},
+            )
+
+    for row in rows_by_gh.values():
+        db.add(row)
+
+    await db.flush()
+
+    cells = [
+        SeedHotspotCell(
+            geohash=gh,
+            incident_count=row.incident_count,
+            time_distribution=row.time_distribution,
+        )
+        for gh, row in rows_by_gh.items()
+    ]
+
+    logger.info("Seeded %d hotspot cell(s) for Stuttgart route", len(cells))
+    return SeedHotspotsResponse(seeded=True, cells=cells)
