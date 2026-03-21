@@ -1,0 +1,126 @@
+---
+description: Mock services, seed data, and dev-only endpoint rules for ShieldHer
+globs: "{app/routers/dev.py,app/services/*_service.py}"
+alwaysApply: false
+---
+
+# Mock Services & Local Dev Rules
+
+## Mock Toggle Pattern
+Every external service must check its mock flag at the top of the function. Mocks must produce realistic output — not just `return {}`.
+
+```python
+# Standard pattern for all services with external dependencies
+
+async def send_emergency_contact_sos(
+    contact_phone: str,
+    person_name: str,
+    lat: float,
+    lng: float,
+) -> None:
+    if settings.MOCK_SMS:
+        logger.info(
+            f"[MOCK SMS → {contact_phone}] "
+            f"SOS from {person_name} at https://maps.google.com/?q={lat},{lng}"
+        )
+        return
+    # real Twilio call below...
+```
+
+## Mock Services Reference
+
+### MOCK_FIREBASE=true
+Skip Firebase token verification. Accept a special test token format:
+```
+Authorization: Bearer mock-token-{phone_number}
+# e.g. Bearer mock-token-+491700000001
+```
+Extract phone from token directly. Create/return the matching user.
+
+### MOCK_SMS=true
+Print formatted SMS to stdout with `[MOCK SMS]` prefix. Include all fields that would be sent (recipient, body, maps link).
+
+### MOCK_MAPS=true
+Return a realistic fake Directions API response:
+```python
+MOCK_DIRECTIONS_RESPONSE = {
+    "distance_meters": 850,
+    "duration_seconds": 607,  # ~10 min walk
+    "polyline": "mock_encoded_polyline_string",
+    "steps": ["Head north on Hauptstrasse", "Turn right onto Kaiserstrasse"]
+}
+```
+
+### MOCK_GEMINI=true
+Return a realistic hardcoded safety summary without calling the API:
+```python
+MOCK_GEMINI_RESPONSES = [
+    "This area has had some safety incidents in the past month — stay on well-lit streets and keep your phone accessible.",
+    "Low incident history in this area — conditions appear normal for this time of day.",
+    "A few incidents were reported near here after 9pm — consider staying on busier routes.",
+]
+# Pick deterministically based on geohash to keep demo consistent
+```
+
+## Dev Endpoint Rules
+Dev endpoints are ONLY mounted when `APP_ENV=development`. Add this guard in `main.py`:
+
+```python
+if settings.APP_ENV == "development":
+    from app.routers import dev
+    app.include_router(dev.router, prefix="/dev", tags=["dev"])
+```
+
+## Seed Data Spec
+The `/dev/seed` endpoint must produce a consistent, demo-ready state:
+
+```python
+HEILBRONN_CENTER = (49.1427, 9.2109)
+
+SEED_SHIELDS = [
+    {"name": "Anna K.", "phone": "+491700000002", "offset": (0.003, 0.002)},   # ~350m
+    {"name": "Sarah M.", "phone": "+491700000003", "offset": (-0.004, 0.001)},  # ~450m
+    {"name": "Lisa W.", "phone": "+491700000004", "offset": (0.001, -0.005)},   # ~500m
+    {"name": "Maria R.", "phone": "+491700000005", "offset": (0.008, 0.003)},   # ~900m
+    {"name": "Julia S.", "phone": "+491700000006", "offset": (-0.006, -0.004)}, # ~720m
+]
+
+SEED_PERSON = {"name": "Test Person", "phone": "+491700000001"}
+
+SEED_INCIDENTS = [
+    # Past incidents for hotspot data — same geohash area
+    {"lat": 49.1431, "lng": 9.2115, "hour": 22},
+    {"lat": 49.1419, "lng": 9.2098, "hour": 23},
+    {"lat": 49.1440, "lng": 9.2120, "hour": 21},
+]
+```
+
+Seed must be **idempotent** — running it twice should not create duplicates. Use `ON CONFLICT DO UPDATE` or check existence first.
+
+## Test SOS Flow Helper
+`/dev/trigger-test-sos` simulates a full SOS sequence for demo purposes:
+
+1. Trigger SOS at Heilbronn center as the seed Person
+2. Auto-respond with the 3 closest seed Shields (mock response — no real push)
+3. Calculate and return convergence point
+4. Return full incident state ready for frontend demo
+
+This endpoint must work with `MOCK_SMS=true` and `MOCK_MAPS=true` — no real API calls.
+
+## Shield Movement Simulator
+`/dev/mock-shield-respond/{incident_id}/{shield_id}` moves a shield 10% closer to convergence on each call. Used to simulate live navigation in the demo:
+
+```python
+# Move shield 10% of remaining distance toward convergence point
+new_lat = shield_lat + (convergence_lat - shield_lat) * 0.1
+new_lng = shield_lng + (convergence_lng - shield_lng) * 0.1
+```
+
+Call this in a loop from the frontend demo script to animate shield movement.
+
+## Logging in Dev Mode
+When `APP_ENV=development`, increase log verbosity:
+- Log all incoming requests with method, path, and user_id
+- Log all Redis reads/writes (key + operation, never value)
+- Log mock service calls with `[MOCK]` prefix
+- Log convergence point recalculations with before/after coordinates

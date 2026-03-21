@@ -1,0 +1,145 @@
+---
+description: Security, privacy, and safety-critical rules for ShieldHer — applied project-wide
+globs: "**/*.py"
+alwaysApply: false
+---
+
+# Security & Safety-Critical Rules
+
+## ShieldHer is a safety-critical product. Failures have real human consequences. These rules are non-negotiable.
+
+## Shield Density Gate
+Before any SOS trigger succeeds, verify the shield density requirement:
+
+```python
+MIN_ACTIVE_SHIELDS_TO_TRIGGER = 3  # At least 3 shields must exist in 3km radius
+MAX_SEARCH_RADIUS_KM = 3.0
+
+async def assert_shield_density(db, redis, lat, lng):
+    shields = await get_active_shields_near(db, redis, lat, lng, radius_km=MAX_SEARCH_RADIUS_KM)
+    if len(shields) < MIN_ACTIVE_SHIELDS_TO_TRIGGER:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "error": "insufficient_shield_coverage",
+                "message": "Not enough active Shields in your area. ShieldHer is not yet available here.",
+                "shields_found": len(shields),
+                "minimum_required": MIN_ACTIVE_SHIELDS_TO_TRIGGER,
+            }
+        )
+```
+
+**This check runs on EVERY SOS trigger. Never skip it.**
+
+## Authentication Rules
+- JWTs expire in 30 days — never set `exp` to `None` or a far-future date
+- JWT secret must be at least 32 characters — validate at startup
+- Never return JWT in a query parameter — always Authorization header only
+- Phone numbers must be normalised to E.164 format before storage: `+491700000001`
+- Firebase tokens have a 1-hour expiry — always verify `exp` claim before trusting
+
+```python
+# Startup validation
+if len(settings.JWT_SECRET) < 32:
+    raise RuntimeError("JWT_SECRET must be at least 32 characters")
+```
+
+## Admin Endpoints
+Admin routes use a static API key (MVP). Key must be at least 32 characters.
+
+```python
+from fastapi import Security, HTTPException
+from fastapi.security import APIKeyHeader
+
+admin_key_header = APIKeyHeader(name="X-Admin-Key")
+
+async def require_admin(api_key: str = Security(admin_key_header)):
+    if api_key != settings.ADMIN_API_KEY:
+        raise HTTPException(status_code=403, detail="Invalid admin key")
+```
+
+Never log the admin key, even partially.
+
+## Privacy — Location Data
+- **Never log raw coordinates** — log geohash or `"location updated"` instead
+- **Never store person's live location in Postgres** during an incident — Redis only
+- **Purge all incident location data from Redis on all-clear or escalation**
+- **Hotspot logging stores geohash only** — never the exact trigger lat/lng
+
+```python
+# ✅ Correct — safe logging
+logger.info(f"Shield {shield_id} location updated (geohash: {geohash})")
+
+# ❌ Wrong — never log coordinates
+logger.info(f"Shield {shield_id} at lat={lat}, lng={lng}")
+```
+
+## Incident Ownership
+Only the user who triggered an incident can:
+- Tap all-clear
+- See full shield identity details
+
+Shields can only see the incident they are assigned to. They cannot browse other incidents.
+
+```python
+async def assert_incident_owner(incident: Incident, current_user: User):
+    if incident.triggered_by != current_user.id:
+        raise HTTPException(status_code=403, detail="Not the incident owner")
+```
+
+## Escalation Safety Net
+If all-clear is not tapped within 30 minutes of an active incident, the escalation job fires. This must be implemented as a background job (not a cron — use a delayed task or a periodic checker):
+
+```python
+ESCALATION_TIMEOUT_MINUTES = 30
+
+# Check in a background task launched at incident creation:
+async def escalation_watcher(incident_id: UUID):
+    await asyncio.sleep(ESCALATION_TIMEOUT_MINUTES * 60)
+    incident = await get_incident(incident_id)
+    if incident and incident.status == "active":
+        await escalate_incident(incident_id)
+        # Send SMS to emergency contact + show nearest police station
+```
+
+## Shield Identity Reveal Timing
+Shields' names and photos are revealed to the Person **only after** they confirm response (status = 'responding'). Never reveal shield identity to the person before they confirm. This is a UX and safety decision — a stranger appearing on the map before they commit feels threatening.
+
+## Rate Limiting (MVP Stub)
+Add a comment placeholder on all public-facing endpoints for rate limiting to be added in V2:
+
+```python
+# TODO V2: Add rate limiting — max 3 SOS triggers per user per hour to prevent abuse
+@router.post("/incidents/trigger")
+async def trigger_sos(...):
+```
+
+## Input Validation
+All lat/lng values must be validated as real geographic coordinates:
+
+```python
+from pydantic import BaseModel, field_validator
+
+class LocationInput(BaseModel):
+    lat: float
+    lng: float
+
+    @field_validator("lat")
+    def validate_lat(cls, v):
+        if not (-90 <= v <= 90):
+            raise ValueError("Latitude must be between -90 and 90")
+        return v
+
+    @field_validator("lng")
+    def validate_lng(cls, v):
+        if not (-180 <= v <= 180):
+            raise ValueError("Longitude must be between -180 and 180")
+        return v
+```
+
+## Never Do These
+- Never expose `/docs` or `/redoc` in production (`APP_ENV=production` → disable Swagger)
+- Never return stack traces in API error responses
+- Never store passwords — auth is entirely Firebase + JWT
+- Never accept `user_id` from request body for auth-protected endpoints — always derive from JWT
+- Never allow a shield to modify another shield's location or status

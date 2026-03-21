@@ -1,0 +1,144 @@
+---
+description: Testing patterns and conventions for ShieldHer — applied to all files in tests/
+globs: "tests/**/*.py"
+alwaysApply: false
+---
+
+# Testing Rules
+
+## Framework
+- `pytest` + `pytest-asyncio` for all async tests
+- `httpx.AsyncClient` for API endpoint testing (not TestClient — it's sync)
+- `pytest-mock` for mocking external services
+- Separate test database: `TEST_DATABASE_URL` in `.env`
+
+## Async Test Setup
+Every test file that uses async must have:
+
+```python
+import pytest
+
+pytestmark = pytest.mark.asyncio
+```
+
+Or configure globally in `pyproject.toml`:
+```toml
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+```
+
+## Test Client Pattern
+Use `httpx.AsyncClient` with the FastAPI app as transport:
+
+```python
+import pytest
+from httpx import AsyncClient, ASGITransport
+from app.main import app
+
+@pytest.fixture
+async def client():
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        yield ac
+```
+
+## Database Fixture
+Each test gets a fresh transaction that is rolled back after the test — never commits to the test DB:
+
+```python
+from sqlalchemy.ext.asyncio import AsyncSession
+from app.database import AsyncSessionLocal
+
+@pytest.fixture
+async def db():
+    async with AsyncSessionLocal() as session:
+        async with session.begin():
+            yield session
+            await session.rollback()
+```
+
+## Auth Fixtures
+Always mock the auth dependency in tests — never call real Firebase:
+
+```python
+from unittest.mock import AsyncMock
+from app.models.users import User, UserRole
+from app.dependencies.auth import get_current_user
+from uuid import uuid4
+
+@pytest.fixture
+def mock_person_user():
+    return User(id=uuid4(), phone="+491700000001", name="Test Person", role=UserRole.person)
+
+@pytest.fixture
+def mock_shield_user():
+    return User(id=uuid4(), phone="+491700000002", name="Test Shield", role=UserRole.shield)
+
+# Override the dependency in tests:
+app.dependency_overrides[get_current_user] = lambda: mock_person_user
+```
+
+## External Service Mocking
+All external HTTP calls must be mocked in tests. Never call real APIs in unit/integration tests.
+
+```python
+from unittest.mock import patch, AsyncMock
+
+async def test_trigger_sos_sends_sms(client, mock_person_user):
+    with patch("app.services.sms_service.send_emergency_contact_sos", new_callable=AsyncMock) as mock_sms:
+        response = await client.post("/incidents/trigger", json={"lat": 49.1427, "lng": 9.2109})
+        assert response.status_code == 200
+        mock_sms.assert_called_once()
+```
+
+## Test File Structure
+Mirror the `app/` structure exactly:
+
+```
+tests/
+  conftest.py           ← shared fixtures (client, db, mock users)
+  test_auth.py          ← Firebase token mock, JWT issue/validate
+  test_incidents.py     ← trigger SOS, shield responds, all-clear, edge cases
+  test_location.py      ← update location, get nearby shields, radius expansion
+  test_hotspots.py      ← log incident, geohash bucketing, risk levels
+  test_shields.py       ← apply, verify, status toggle
+  test_navigation.py    ← convergence point calculation, ETA
+```
+
+## What to Test Per Domain
+
+### test_incidents.py must cover:
+- Trigger SOS creates incident in DB
+- Trigger SOS notifies correct shields within radius
+- Radius expands from 1km → 3km if fewer than 3 shields found
+- No shields in range → SMS to emergency contact fires
+- Shield responds with 'responding' → convergence point calculated
+- 3+ shields responding → remaining shields marked 'covered'
+- All-clear resolves incident and notifies all parties
+- All-clear by non-owner returns 403
+
+### test_location.py must cover:
+- Shield location update writes to Redis with 5-min TTL
+- Stale location (> 5 min) not returned by get_active_shields_near
+- Radius expansion logic (1km → 2km → 3km)
+- Person location update during incident publishes to Redis channel
+
+### test_hotspots.py must cover:
+- Incident log increments correct geohash bucket
+- Adjacent geohash cells included in summary query
+- Risk level thresholds: low (< 2), medium (2–5), high (> 5)
+- Gemini not called when incident count is 0
+
+## Assertions Style
+Be specific — assert on the exact fields that matter:
+
+```python
+# ✅ Specific
+assert response.json()["shields_notified"] == 3
+assert response.json()["incident_id"] is not None
+
+# ❌ Too vague
+assert response.status_code == 200
+```
+
+## Seed Data for Tests
+Use the `/dev/seed` endpoint or the `seed_db` fixture — never manually insert raw SQL in tests.

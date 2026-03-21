@@ -1,0 +1,136 @@
+---
+description: SQLAlchemy models and Alembic migration rules for ShieldHer
+globs: "{app/models/**/*.py,app/database.py,alembic/**/*}"
+alwaysApply: false
+---
+
+# Database Rules
+
+## SQLAlchemy Async Setup
+Always use `AsyncSession` and `async_sessionmaker`. Never use sync SQLAlchemy.
+
+```python
+# app/database.py
+from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
+from sqlalchemy.orm import DeclarativeBase
+
+engine = create_async_engine(settings.DATABASE_URL, echo=settings.APP_ENV == "development")
+AsyncSessionLocal = async_sessionmaker(engine, expire_on_commit=False)
+
+class Base(DeclarativeBase):
+    pass
+
+async def get_db():
+    async with AsyncSessionLocal() as session:
+        try:
+            yield session
+        except Exception:
+            await session.rollback()
+            raise
+```
+
+## Model Conventions
+- ALL models inherit from `Base` (imported from `app/database.py`)
+- ALL primary keys are `UUID`, generated server-side with `default=uuid4`
+- ALL timestamps are UTC datetime with `server_default=func.now()`
+- Use `Mapped[]` and `mapped_column()` (SQLAlchemy 2.0 style) — NOT the old `Column()` style
+- Enums use Python `enum.Enum` classes — defined in the same model file
+
+```python
+# ✅ Correct SQLAlchemy 2.0 style
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+from sqlalchemy import String, Boolean, DateTime, Enum as SAEnum, func
+from uuid import UUID, uuid4
+from datetime import datetime
+import enum
+
+class ShieldStatus(enum.Enum):
+    active = "active"
+    inactive = "inactive"
+    pending = "pending"
+
+class Shield(Base):
+    __tablename__ = "shields"
+
+    id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
+    user_id: Mapped[UUID] = mapped_column(ForeignKey("users.id"), unique=True)
+    status: Mapped[ShieldStatus] = mapped_column(SAEnum(ShieldStatus), default=ShieldStatus.pending)
+    id_verified: Mapped[bool] = mapped_column(Boolean, default=False)
+    current_lat: Mapped[float | None] = mapped_column(nullable=True)
+    current_lng: Mapped[float | None] = mapped_column(nullable=True)
+    location_updated_at: Mapped[datetime | None] = mapped_column(nullable=True)
+    created_at: Mapped[datetime] = mapped_column(server_default=func.now())
+
+# ❌ Old style — do not use
+class Shield(Base):
+    __tablename__ = "shields"
+    id = Column(UUID, primary_key=True)  # BAD
+```
+
+## Indexes
+Add indexes on all columns used in WHERE clauses:
+
+```python
+from sqlalchemy import Index
+
+class Shield(Base):
+    __tablename__ = "shields"
+    # ...
+    __table_args__ = (
+        Index("ix_shields_status_verified", "status", "id_verified"),
+    )
+```
+
+## Alembic Async Config
+`alembic/env.py` must use async engine. Never run migrations with a sync connection.
+
+```python
+# alembic/env.py — key section
+from sqlalchemy.ext.asyncio import async_engine_from_config
+import asyncio
+
+def run_migrations_online():
+    connectable = async_engine_from_config(config.get_section(config.config_ini_section))
+
+    async def do_run_migrations(connection):
+        await connection.run_sync(run_migrations)
+
+    async def run_async_migrations():
+        async with connectable.connect() as connection:
+            await do_run_migrations(connection)
+
+    asyncio.run(run_async_migrations())
+```
+
+## Migration Rules
+- One migration per logical change — never squash multiple unrelated changes
+- Always provide a descriptive `--message` when generating: `alembic revision --autogenerate -m "add hotspot_data table"`
+- Never edit a migration that has already been applied to any shared environment
+- After any model change, run `alembic revision --autogenerate` and review the generated file before applying
+
+## JSONB Columns
+Use `JSONB` for `time_distribution` in `hotspot_data`:
+
+```python
+from sqlalchemy.dialects.postgresql import JSONB
+
+class HotspotData(Base):
+    __tablename__ = "hotspot_data"
+    time_distribution: Mapped[dict] = mapped_column(JSONB, default=dict)
+```
+
+## Geospatial Queries
+For the MVP, use plain `lat`/`lng` float columns with Haversine distance calculation in Python (via `app/utils/geo.py`). Do NOT add PostGIS unless specifically requested — it complicates the Docker setup.
+
+```python
+# app/utils/geo.py — Haversine used for shield proximity queries
+import math
+
+def haversine_distance(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
+    """Returns distance in kilometers."""
+    R = 6371
+    dlat = math.radians(lat2 - lat1)
+    dlng = math.radians(lng2 - lng1)
+    a = math.sin(dlat/2)**2 + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dlng/2)**2
+    return R * 2 * math.asin(math.sqrt(a))
+```

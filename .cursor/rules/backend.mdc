@@ -1,0 +1,201 @@
+---
+description: FastAPI backend patterns for ShieldHer — applied to all Python files in app/
+globs: "app/**/*.py"
+alwaysApply: false
+---
+
+# FastAPI Backend Rules
+
+## Router Pattern
+Routers must be thin. All logic goes in services. A route handler should:
+1. Validate input (Pydantic does this automatically)
+2. Extract the current user from the auth dependency
+3. Call one or more service functions
+4. Return a typed response model
+
+```python
+# ✅ Correct — thin router
+@router.post("/incidents/trigger", response_model=TriggerSOSResponse)
+async def trigger_sos(
+    body: TriggerSOSRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+    background_tasks: BackgroundTasks = BackgroundTasks(),
+):
+    incident = await incident_service.create_incident(db, current_user.id, body.lat, body.lng)
+    shields = await location_service.get_active_shields_near(body.lat, body.lng)
+    background_tasks.add_task(sms_service.send_emergency_contact_sos, ...)
+    return TriggerSOSResponse(incident_id=incident.id, shields_notified=len(shields))
+
+# ❌ Wrong — business logic in router
+@router.post("/incidents/trigger")
+async def trigger_sos(body: TriggerSOSRequest, db: AsyncSession = Depends(get_db)):
+    # calculating convergence point here is wrong
+    shields = await db.execute(select(Shield).where(...))
+    midpoint_lat = sum(s.lat for s in shields) / len(shields)
+    ...
+```
+
+## Dependency Injection
+Always use `Depends()` for:
+- `get_db` — database session
+- `get_current_user` — authenticated user from JWT
+- `require_shield` — user must be a verified shield
+- `require_admin` — request must have valid `X-Admin-Key` header
+
+```python
+# Auth dependencies live in app/dependencies/auth.py
+async def get_current_user(
+    token: str = Depends(oauth2_scheme),
+    db: AsyncSession = Depends(get_db),
+) -> User:
+    ...
+
+async def require_shield(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> Shield:
+    shield = await db.get(Shield, current_user.id)
+    if not shield or not shield.id_verified:
+        raise HTTPException(status_code=403, detail="Verified shield account required")
+    return shield
+```
+
+## Pydantic Schemas
+- Use `model_config = ConfigDict(from_attributes=True)` on all response schemas that map from ORM models
+- Never return ORM model objects directly from endpoints
+- Use `UUID` type (not `str`) for IDs in schemas — FastAPI serialises them correctly
+- Use `datetime` with timezone for all timestamps
+
+```python
+from pydantic import BaseModel, ConfigDict
+from uuid import UUID
+from datetime import datetime
+
+class IncidentResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    status: str
+    triggered_at: datetime
+    convergence_lat: float | None
+    convergence_lng: float | None
+```
+
+## Database Access Pattern
+Use `AsyncSession` from SQLAlchemy. Prefer `select()` with explicit columns over ORM lazy loading.
+
+```python
+# ✅ Correct async pattern
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+async def get_incident(db: AsyncSession, incident_id: UUID) -> Incident | None:
+    result = await db.execute(select(Incident).where(Incident.id == incident_id))
+    return result.scalar_one_or_none()
+
+async def create_incident(db: AsyncSession, ...) -> Incident:
+    incident = Incident(...)
+    db.add(incident)
+    await db.commit()
+    await db.refresh(incident)
+    return incident
+```
+
+## Redis Client
+Always use an `asyncio`-compatible Redis client. Initialise once at app startup via `lifespan`.
+
+```python
+# In main.py lifespan:
+from contextlib import asynccontextmanager
+import redis.asyncio as redis
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    app.state.redis = redis.from_url(settings.REDIS_URL, decode_responses=True)
+    yield
+    await app.state.redis.aclose()
+
+# In a service, get from request state:
+async def update_shield_location(redis_client: redis.Redis, shield_id: str, lat: float, lng: float):
+    await redis_client.hset(f"shieldher:shield:location:{shield_id}", mapping={
+        "lat": lat, "lng": lng, "updated_at": datetime.utcnow().isoformat()
+    })
+    await redis_client.expire(f"shieldher:shield:location:{shield_id}", 300)  # 5 min TTL
+```
+
+## External HTTP Calls
+Always use `httpx.AsyncClient` with a timeout. Never use `requests`.
+
+```python
+import httpx
+
+async def call_google_maps(origin: tuple, dest: tuple) -> dict:
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        response = await client.get(
+            "https://maps.googleapis.com/maps/api/directions/json",
+            params={"origin": f"{origin[0]},{origin[1]}", "destination": f"{dest[0]},{dest[1]}", 
+                    "mode": "walking", "key": settings.GOOGLE_MAPS_API_KEY}
+        )
+        response.raise_for_status()
+        return response.json()
+```
+
+## Background Tasks
+Use FastAPI `BackgroundTasks` for fire-and-forget operations (SMS, push notifications).
+Background tasks must NEVER raise — catch all exceptions.
+
+```python
+async def send_emergency_contact_sos(contact_phone: str, person_name: str, lat: float, lng: float):
+    try:
+        if settings.MOCK_SMS:
+            logger.info(f"[MOCK SMS] SOS to {contact_phone} for {person_name} at {lat},{lng}")
+            return
+        # real Twilio call
+        async with httpx.AsyncClient() as client:
+            ...
+    except Exception:
+        logger.exception(f"Failed to send SOS SMS to {contact_phone}")
+```
+
+## Config Access
+All config via the Settings singleton. Import once, use everywhere.
+
+```python
+# app/config.py
+from pydantic_settings import BaseSettings
+
+class Settings(BaseSettings):
+    DATABASE_URL: str
+    REDIS_URL: str
+    JWT_SECRET: str
+    MOCK_FIREBASE: bool = False
+    MOCK_SMS: bool = False
+    MOCK_MAPS: bool = False
+    MOCK_GEMINI: bool = False
+    APP_ENV: str = "production"
+    ADMIN_API_KEY: str
+
+    class Config:
+        env_file = ".env"
+
+settings = Settings()
+```
+
+## Lifespan — App Startup/Shutdown
+Use `lifespan` context manager (not deprecated `on_event`):
+
+```python
+from contextlib import asynccontextmanager
+from fastapi import FastAPI
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # startup
+    app.state.redis = ...
+    yield
+    # shutdown
+    await app.state.redis.aclose()
+
+app = FastAPI(lifespan=lifespan)
+```

@@ -1,0 +1,107 @@
+# ── Python ────────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyd
+*.pyo
+.Python
+*.egg
+*.egg-info/
+.eggs/
+dist/
+build/
+wheels/
+*.whl
+MANIFEST
+pip-log.txt
+pip-delete-this-directory.txt
+
+# ── Virtual environments ───────────────────────────────────────────────────────
+.venv/
+venv/
+env/
+ENV/
+.env.bak
+virtualenv/
+
+# ── Environment / secrets ──────────────────────────────────────────────────────
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+service_account*.json
+firebase_*.json
+google_credentials*.json
+
+# ── Testing & coverage ─────────────────────────────────────────────────────────
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+*.cover
+nosetests.xml
+test-results/
+.tox/
+.nox/
+
+# ── Type checking / linting ────────────────────────────────────────────────────
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.ruff_cache/
+.pytype/
+
+# ── Alembic ────────────────────────────────────────────────────────────────────
+# Keep the versions directory tracked but ignore auto-generated migration files
+# (remove the lines below if you want to commit migrations)
+# alembic/versions/*.py
+# !alembic/versions/.gitkeep
+
+# ── Docker ────────────────────────────────────────────────────────────────────
+*.log
+docker-compose.override.yml
+
+# ── Logs & runtime ────────────────────────────────────────────────────────────
+logs/
+*.log
+*.log.*
+pid/
+*.pid
+*.seed
+*.gz
+
+# ── IDEs & editors ────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.project
+.classpath
+.settings/
+*.sublime-project
+*.sublime-workspace
+
+# ── OS ────────────────────────────────────────────────────────────────────────
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini
+
+# ── Jupyter ───────────────────────────────────────────────────────────────────
+.ipynb_checkpoints/
+*.ipynb
+
+# ── Misc ──────────────────────────────────────────────────────────────────────
+*.bak
+*.tmp
+*.orig
+.cache/

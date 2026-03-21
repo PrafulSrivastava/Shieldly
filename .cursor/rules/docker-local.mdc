@@ -1,0 +1,145 @@
+---
+description: Docker Compose and local development environment rules for ShieldHer
+globs: "{docker-compose.yml,Dockerfile,.env*,Makefile}"
+alwaysApply: false
+---
+
+# Local Development & Docker Rules
+
+## Docker Compose Structure
+The local stack always runs three containers on a shared network:
+
+```
+postgres   → port 5432  (persistent volume: shieldher_pgdata)
+redis      → port 6379  (persistent volume: shieldher_redisdata)
+app        → port 8000  (hot-reload via uvicorn --reload)
+```
+
+All containers use a single Docker network: `shieldher_network`.
+
+## Environment Variable Strategy
+Local dev uses `.env` (gitignored). `.env.example` is committed and stays in sync.
+
+**Mock toggles for local testing (no real credentials needed):**
+```
+MOCK_FIREBASE=true    # Skip real Firebase token verification
+MOCK_SMS=true         # Print SMS to console instead of calling Twilio
+MOCK_MAPS=true        # Return fake Directions API response
+MOCK_GEMINI=true      # Return hardcoded safety summary
+APP_ENV=development   # Enables /dev/* seed endpoints
+```
+
+**Real credentials only needed for:**
+- Integration testing against live Firebase
+- Testing real SMS delivery via Twilio
+- Live Google Maps routing
+- Gemini AI summaries
+
+## Dockerfile Rules
+- Base image: `python:3.11-slim` (not alpine — asyncpg needs build tools)
+- Install system deps: `gcc libpq-dev` (required for asyncpg compilation)
+- Copy `requirements.txt` before source code (layer caching)
+- Run as non-root user in production
+
+```dockerfile
+FROM python:3.11-slim
+
+RUN apt-get update && apt-get install -y gcc libpq-dev && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY . .
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+```
+
+## Health Checks
+Every container must have a health check. The app container's health check hits `/health`.
+
+```yaml
+healthcheck:
+  test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+  interval: 10s
+  timeout: 5s
+  retries: 3
+  start_period: 30s
+```
+
+## Container Startup Order
+App depends on Postgres AND Redis being healthy — not just started.
+
+```yaml
+app:
+  depends_on:
+    postgres:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+```
+
+## Makefile Commands
+The Makefile is the single interface for all dev operations. Never ask the developer to remember raw Docker or Alembic commands.
+
+```makefile
+up:
+	docker compose up -d
+
+down:
+	docker compose down
+
+migrate:
+	docker compose exec app alembic upgrade head
+
+seed:
+	curl -s -X POST http://localhost:8000/dev/seed | python3 -m json.tool
+
+test:
+	docker compose exec app pytest tests/ -v
+
+logs:
+	docker compose logs -f app
+
+shell:
+	docker compose exec app bash
+
+reset:
+	docker compose down -v && docker compose up -d && sleep 5 && make migrate && make seed
+```
+
+## Database Connection String
+Always use `asyncpg` driver for async SQLAlchemy:
+
+```
+# In .env (local)
+DATABASE_URL=postgresql+asyncpg://shieldher:shieldher@localhost:5432/shieldher
+
+# In docker-compose.yml for app container (uses service name, not localhost)
+DATABASE_URL=postgresql+asyncpg://shieldher:shieldher@postgres:5432/shieldher
+```
+
+## Redis Connection String
+```
+# Local .env
+REDIS_URL=redis://localhost:6379/0
+
+# In docker-compose.yml app container
+REDIS_URL=redis://redis:6379/0
+```
+
+## Volume Naming
+Use named volumes (not bind mounts) for database data to avoid permission issues:
+
+```yaml
+volumes:
+  shieldher_pgdata:
+  shieldher_redisdata:
+```
+
+## Port Conflicts
+If ports 5432 or 6379 are already in use locally, map to non-standard ports:
+```yaml
+ports:
+  - "5433:5432"  # local port 5433 → container 5432
+```
+And update `DATABASE_URL` to use port 5433 accordingly.

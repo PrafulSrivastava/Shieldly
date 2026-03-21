@@ -1,0 +1,75 @@
+---
+description: General project rules for ShieldHer — always applied across the entire codebase
+globs: "**/*"
+alwaysApply: true
+---
+
+# ShieldHer — Project Context
+
+ShieldHer is a real-time women's safety broadcast network. When a woman triggers an SOS, verified nearby Shields (volunteers) are notified simultaneously and both parties are guided to a convergence point via live GPS navigation.
+
+## Stack
+- **Backend**: FastAPI (Python 3.11+) with async/await throughout
+- **Database**: PostgreSQL 15 via SQLAlchemy (async, asyncpg driver)
+- **Cache / Pub-Sub**: Redis 7 (redis-py asyncio)
+- **Migrations**: Alembic (async)
+- **Auth**: Firebase Phone OTP → internal JWT (python-jose)
+- **SMS**: Twilio via httpx (not the Twilio SDK)
+- **Maps**: Google Maps Directions API via httpx
+- **AI**: Gemini 1.5 Flash via httpx
+- **Voice**: ElevenLabs
+- **Local Dev**: Docker Compose (Postgres + Redis + app containers)
+
+## Non-Negotiables
+- ALL I/O must be async — no synchronous DB calls, HTTP calls, or blocking operations anywhere
+- Never use `time.sleep()` — use `asyncio.sleep()`
+- Never use `requests` — use `httpx.AsyncClient`
+- Every endpoint must have a Pydantic response model
+- All secrets come from environment variables via `app/config.py` — never hardcoded
+- Mock modes must be togglable via env vars: `MOCK_FIREBASE`, `MOCK_SMS`, `MOCK_MAPS`, `MOCK_GEMINI`
+- `APP_ENV=development` gates dev/seed endpoints — never expose in production
+
+## Code Style
+- Use Python type hints everywhere — no `Any` unless genuinely unavoidable
+- Prefer `async with` and context managers for resource management
+- Keep route handlers thin — business logic lives in `app/services/`
+- One responsibility per service function
+- Log errors with `logger.exception()` — never silent `except: pass`
+- Use `UUID` (not int) for all primary keys
+- All datetimes are UTC — use `datetime.utcnow()` or `datetime.now(timezone.utc)`
+
+## File Layout Convention
+```
+app/
+  main.py          ← FastAPI app init, router registration, lifespan
+  config.py        ← pydantic-settings Settings class
+  database.py      ← async engine, session factory, get_db dependency
+  models/          ← SQLAlchemy ORM models (one file per table)
+  schemas/         ← Pydantic request/response models (one file per domain)
+  routers/         ← FastAPI routers (thin — call services only)
+  services/        ← Business logic (location, incident, sms, navigation, hotspot)
+  utils/           ← Pure utility functions (geo math, geohash, etc.)
+tests/             ← pytest-asyncio tests (mirrors app/ structure)
+```
+
+## Error Handling Pattern
+```python
+# Always return structured errors
+from fastapi import HTTPException
+
+raise HTTPException(status_code=404, detail="Incident not found")
+
+# Background tasks must not raise — catch and log
+async def background_task():
+    try:
+        await do_thing()
+    except Exception:
+        logger.exception("Background task failed")
+```
+
+## Naming Conventions
+- Route functions: `verb_noun` (e.g., `trigger_sos`, `get_incident`, `respond_to_incident`)
+- Service functions: `verb_noun` (e.g., `calculate_convergence_point`, `send_sos_sms`)
+- Models: PascalCase matching table name (e.g., `IncidentResponse`)
+- Schemas: suffix with `Request` or `Response` (e.g., `TriggerSOSRequest`, `IncidentResponse`)
+- Redis keys: always prefixed `shieldher:` (e.g., `shieldher:shield:location:{shield_id}`)

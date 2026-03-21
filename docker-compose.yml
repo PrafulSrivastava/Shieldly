@@ -1,0 +1,83 @@
+networks:
+  shieldher-net:
+    driver: bridge
+
+volumes:
+  postgres-data:
+  redis-data:
+
+services:
+  # ── PostgreSQL 15 ────────────────────────────────────────────────────────────
+  db:
+    image: postgis/postgis:15-3.4-alpine
+    container_name: shieldher-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: shieldher
+      POSTGRES_PASSWORD: shieldher
+      POSTGRES_DB: shieldher
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    ports:
+      - "5433:5432"   # host:container — use 5433 to avoid conflicts with a local Postgres
+    networks:
+      - shieldher-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U shieldher -d shieldher"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # ── Redis 7 ─────────────────────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: shieldher-redis
+    restart: unless-stopped
+    command: redis-server --save 60 1 --loglevel warning
+    volumes:
+      - redis-data:/data
+    ports:
+      - "6379:6379"
+    networks:
+      - shieldher-net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+
+  # ── FastAPI app ──────────────────────────────────────────────────────────────
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: shieldher-app
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://shieldher:shieldher@db:5432/shieldher
+      REDIS_URL: redis://redis:6379/0
+    ports:
+      - "8000:8000"
+    networks:
+      - shieldher-net
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    volumes:
+      - .:/app          # live-reload in development; remove in prod
+    command: >
+      uvicorn app.main:app
+        --host 0.0.0.0
+        --port 8000
+        --reload

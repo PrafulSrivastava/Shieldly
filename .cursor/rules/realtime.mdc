@@ -1,0 +1,143 @@
+---
+description: Real-time location, Redis pub/sub, and convergence point rules for ShieldHer
+globs: "{app/services/location_service.py,app/services/navigation_service.py,app/routers/location.py}"
+alwaysApply: false
+---
+
+# Real-Time Location & Navigation Rules
+
+## Redis Key Schema
+All Redis keys must follow this exact naming convention — never deviate:
+
+```
+shieldher:shield:location:{shield_id}     → Hash: {lat, lng, updated_at}
+shieldher:incident:location:{incident_id} → Hash: {lat, lng, updated_at}
+shieldher:incident:{incident_id}:state    → Hash: {status, convergence_lat, convergence_lng}
+shieldher:incident:{incident_id}:updates  → Pub/Sub channel for live updates
+shieldher:incident:{incident_id}:responders → Set of responding shield_ids
+```
+
+## TTL Policy
+- Shield location cache: **300 seconds (5 minutes)** — stale if shield goes offline
+- Incident state cache: **No TTL** — explicitly deleted on all-clear
+- Person location during incident: **No TTL** — incident cleanup handles it
+
+```python
+await redis.expire(f"shieldher:shield:location:{shield_id}", 300)
+```
+
+## Stale Location Detection
+Never return a shield whose location is older than 5 minutes:
+
+```python
+from datetime import datetime, timezone, timedelta
+
+async def is_location_fresh(updated_at_str: str) -> bool:
+    updated_at = datetime.fromisoformat(updated_at_str)
+    if updated_at.tzinfo is None:
+        updated_at = updated_at.replace(tzinfo=timezone.utc)
+    return datetime.now(timezone.utc) - updated_at < timedelta(minutes=5)
+```
+
+## Shield Proximity Query — Radius Expansion
+Always attempt 1km first, expand only if insufficient shields found:
+
+```python
+async def get_active_shields_near(
+    db: AsyncSession,
+    redis_client,
+    lat: float,
+    lng: float,
+    min_shields: int = 3,
+) -> list[dict]:
+    for radius_km in [1.0, 2.0, 3.0]:
+        shields = await _query_shields_in_radius(db, redis_client, lat, lng, radius_km)
+        if len(shields) >= min_shields:
+            return shields
+    return shields  # Return whatever we have at max radius
+```
+
+## Convergence Point Calculation
+Use a weighted centroid — person counts twice (she needs to walk the least):
+
+```python
+def calculate_convergence_point(
+    person_lat: float,
+    person_lng: float,
+    shield_locations: list[tuple[float, float]],
+) -> tuple[float, float]:
+    if not shield_locations:
+        return person_lat, person_lng
+
+    # Person weighted 2x — minimises her movement
+    all_lats = [person_lat, person_lat] + [s[0] for s in shield_locations]
+    all_lngs = [person_lng, person_lng] + [s[1] for s in shield_locations]
+    return sum(all_lats) / len(all_lats), sum(all_lngs) / len(all_lngs)
+```
+
+**Recalculate convergence point every time a shield confirms response.** Push the updated point to Redis and all clients.
+
+## ETA Calculation Fallback
+Google Maps Directions API is preferred. If it fails (timeout, quota, MOCK_MAPS=true), fall back to walking speed estimate:
+
+```python
+WALKING_SPEED_MS = 1.4  # meters per second (~5 km/h)
+
+def estimate_eta_seconds(distance_km: float) -> int:
+    return int((distance_km * 1000) / WALKING_SPEED_MS)
+```
+
+## Pub/Sub Message Format
+Every location update published to a Redis channel must follow this schema:
+
+```python
+import json
+from datetime import datetime, timezone
+
+# Person location update
+await redis.publish(
+    f"shieldher:incident:{incident_id}:updates",
+    json.dumps({
+        "type": "person_location",
+        "lat": lat,
+        "lng": lng,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    })
+)
+
+# Shield location update during incident
+await redis.publish(
+    f"shieldher:incident:{incident_id}:updates",
+    json.dumps({
+        "type": "shield_location",
+        "shield_id": str(shield_id),
+        "lat": lat,
+        "lng": lng,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    })
+)
+
+# Convergence point update
+await redis.publish(
+    f"shieldher:incident:{incident_id}:updates",
+    json.dumps({
+        "type": "convergence_update",
+        "convergence_lat": convergence_lat,
+        "convergence_lng": convergence_lng,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    })
+)
+```
+
+## Location Update Endpoints
+- `PATCH /location/shield` — shield updates their own position (poll every 10s when active)
+- `PATCH /location/incident/{incident_id}` — person updates position during active incident (poll every 5s)
+- `GET /location/incident/{incident_id}/all` — snapshot of all current positions (used for initial load)
+
+The `/all` endpoint reads from Redis first, falls back to Postgres. Never do a heavy DB join on the hot path.
+
+## Privacy Rules (Non-Negotiable)
+- Person's live location is ONLY stored in Redis during an active incident
+- On all-clear or incident resolution: delete all Redis location keys for that incident
+- Never log raw coordinates to application logs — use geohash or 'location updated' instead
+- Location data is never persisted to Postgres beyond what's needed for hotspot aggregation (geohash only, not exact lat/lng)
