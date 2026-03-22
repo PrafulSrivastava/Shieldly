@@ -445,6 +445,10 @@ async def mock_incident_respond(
             detail="No notified shields found for this incident",
         )
 
+    # Cap at nearest 3 shields (rows are already ordered by insertion which
+    # mirrors distance order from get_active_shields_near)
+    rows = rows[:3]
+
     responded = 0
     for _inc_resp, shield in rows:
         try:

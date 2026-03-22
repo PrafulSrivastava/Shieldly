@@ -1,18 +1,19 @@
 import { useState, useEffect, useRef } from 'react'
 import { Users } from 'lucide-react'
-import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet'
+import { MapContainer, TileLayer, Marker, Popup, Polyline, Circle, useMap } from 'react-leaflet'
 import L from 'leaflet'
+import polyline from '@mapbox/polyline'
 import {
   triggerSOS,
   getIncident,
   resolveIncident,
   getHotspotContext,
   verifyToken,
+  simulateShieldAccept,
   ShieldStatusInfo,
 } from '../api/endpoints'
 import { useStore } from '../store'
 import BottomTabBar from '../components/BottomTabBar'
-import ShieldCard from '../components/ShieldCard'
 import Skeleton from '../components/Skeleton'
 
 // ── Map helpers for the active SOS state ──────────────────────────────────────
@@ -54,12 +55,24 @@ function makeIncidentShieldIcon(status: string) {
   })
 }
 
+function MapResizer() {
+  const map = useMap()
+  useEffect(() => {
+    const t = setTimeout(() => map.invalidateSize(), 150)
+    return () => clearTimeout(t)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+  return null
+}
+
 function SOSMapFitter({
   person,
   shields,
+  convergencePoint,
 }: {
   person: { lat: number; lng: number }
   shields: ShieldStatusInfo[]
+  convergencePoint: { lat: number; lng: number } | null
 }) {
   const map = useMap()
   useEffect(() => {
@@ -67,13 +80,14 @@ function SOSMapFitter({
     shields.forEach((s) => {
       if (s.lat != null && s.lng != null) pts.push([s.lat, s.lng])
     })
+    if (convergencePoint) pts.push([convergencePoint.lat, convergencePoint.lng])
     if (pts.length < 2) {
       map.setView([person.lat, person.lng], 14)
     } else {
-      map.fitBounds(L.latLngBounds(pts), { padding: [48, 48] })
+      map.fitBounds(L.latLngBounds(pts), { padding: [52, 52] })
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [shields.length])
+  }, [shields.length, convergencePoint != null])
   return null
 }
 
@@ -96,6 +110,8 @@ export default function SOSLanding() {
   const [countdown, setCountdown] = useState<number>(COUNTDOWN_SEC)
   const [incidentId, setIncidentId] = useState<string | null>(null)
   const [shields, setShields] = useState<ShieldStatusInfo[]>([])
+  const [convergencePoint, setConvergencePoint] = useState<{ lat: number; lng: number } | null>(null)
+  const [personPolyline, setPersonPolyline] = useState<string | null>(null)
   const [nearbyCount, setNearbyCount] = useState<number | null>(null)
   const [riskLevel, setRiskLevel] = useState<string | null>(null)
   const [errorMsg, setErrorMsg] = useState<string | null>(null)
@@ -152,6 +168,11 @@ export default function SOSLanding() {
           clearInterval(intervalRef.current!)
           setState('active')
           startPolling(resp.incident_id)
+          // Auto-simulate nearest shields responding after a 2 s delay
+          setTimeout(
+            () => simulateShieldAccept(resp.incident_id).catch(() => {}),
+            2000,
+          )
         }
       }, 100)
     } catch (e: unknown) {
@@ -182,6 +203,7 @@ export default function SOSLanding() {
       } catch {}
     }
     setState('resolved')
+    setPersonPolyline(null)
     storeSetIncidentId(null)
   }
 
@@ -189,11 +211,12 @@ export default function SOSLanding() {
     pollRef.current = setInterval(async () => {
       try {
         const detail = await getIncident(id)
-        // Filter to valid shields with real data
         const safeShields = (detail.shields ?? []).filter(
           (s) => s.shield_id && s.name,
         )
         setShields(safeShields)
+        setConvergencePoint(detail.convergence_point ?? null)
+        setPersonPolyline(detail.person_polyline ?? null)
         if (detail.status === 'resolved') {
           clearInterval(pollRef.current!)
           setState('resolved')
@@ -226,7 +249,7 @@ export default function SOSLanding() {
       </header>
 
       {/* Main */}
-      <main className={`flex-1 flex flex-col gap-4 ${state === 'active' ? 'pt-2' : 'items-center justify-center px-6 gap-8'}`}>
+      <main className={`flex-1 flex flex-col ${state === 'active' ? 'relative overflow-hidden' : 'items-center justify-center px-6 gap-8'}`}>
 
         {/* Error */}
         {errorMsg && (
@@ -325,102 +348,205 @@ export default function SOSLanding() {
           </div>
         )}
 
-        {/* ── ACTIVE ── */}
-        {state === 'active' && (
-          <div className="w-full flex flex-col gap-3 animate-fade-up">
-            {/* Status banner */}
-            <div className="mx-4 bg-[#F5EDD5] border border-[#E3CE96] rounded-2xl px-5 py-4 text-center">
-              <div className="font-display text-2xl text-ink mb-0.5">
-                Help is on the way
-              </div>
-              <div className="font-sans text-sm text-ink-muted">
-                {shields.filter((s) => s.status !== 'declined').length > 0
-                  ? `${shields.filter((s) => s.status !== 'declined').length} shield${shields.filter((s) => s.status !== 'declined').length !== 1 ? 's' : ''} responding`
-                  : 'Locating shields nearby…'}
-              </div>
-            </div>
+        {/* ── ACTIVE ── full-bleed map with floating overlays ── */}
+        {state === 'active' && (() => {
+          const activeCount = shields.filter((s) => s.status !== 'declined').length
+          const sortedShields = shields.slice().sort((a, b) => {
+            const order: Record<string, number> = { responding: 0, arrived: 0, notified: 1, declined: 2 }
+            return (order[a.status] ?? 1) - (order[b.status] ?? 1)
+          })
+          return (
+            <div className="absolute inset-0 animate-fade-up">
 
-            {/* Incident map */}
-            <div className="mx-4 rounded-2xl overflow-hidden shadow-md" style={{ height: 300 }}>
-              <MapContainer
-                center={[HEILBRONN.lat, HEILBRONN.lng]}
-                zoom={13}
-                style={{ height: '100%', width: '100%' }}
-                zoomControl={false}
-                attributionControl={false}
-              >
-                <TileLayer url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png" />
-                {/* Person */}
-                <Marker position={[HEILBRONN.lat, HEILBRONN.lng]} icon={personMarkerIcon}>
-                  <Popup>
-                    <span className="font-sans text-xs">You are here</span>
-                  </Popup>
-                </Marker>
-                {/* Shields */}
-                {shields
-                  .filter((s) => s.lat != null && s.lng != null)
-                  .map((s) => (
-                    <Marker
-                      key={s.shield_id}
-                      position={[s.lat!, s.lng!]}
-                      icon={makeIncidentShieldIcon(s.status)}
+              {/* ── Full-bleed map ── */}
+              <div className="absolute inset-0">
+                <MapContainer
+                  center={[HEILBRONN.lat, HEILBRONN.lng]}
+                  zoom={13}
+                  style={{ height: '100%', width: '100%' }}
+                  zoomControl={false}
+                  attributionControl={false}
+                >
+                  <TileLayer url="https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png" />
+
+                  {/* Person */}
+                  <Marker position={[HEILBRONN.lat, HEILBRONN.lng]} icon={personMarkerIcon}>
+                    <Popup><span className="font-sans text-xs">You are here</span></Popup>
+                  </Marker>
+
+                  {/* Shields */}
+                  {shields
+                    .filter((s) => s.lat != null && s.lng != null)
+                    .map((s) => (
+                      <Marker key={s.shield_id} position={[s.lat!, s.lng!]} icon={makeIncidentShieldIcon(s.status)}>
+                        <Popup>
+                          <div className="font-sans text-xs">
+                            <strong>{s.name || 'Shield'}</strong><br />
+                            <span className="capitalize">{s.status}</span>
+                            {s.eta_seconds != null && <> · {Math.round(s.eta_seconds / 60)} min</>}
+                          </div>
+                        </Popup>
+                      </Marker>
+                    ))}
+
+                  {/* Walking route: person → nearest responding shield */}
+                  {personPolyline ? (
+                    <Polyline
+                      positions={polyline.decode(personPolyline) as [number, number][]}
+                      pathOptions={{ color: '#7BB3A6', weight: 3, opacity: 0.9 }}
+                    />
+                  ) : convergencePoint ? (
+                    /* Fallback faint dashed line to convergence while shields not yet responding */
+                    <Polyline
+                      positions={[[HEILBRONN.lat, HEILBRONN.lng], [convergencePoint.lat, convergencePoint.lng]]}
+                      pathOptions={{ color: '#7BB3A6', weight: 2, dashArray: '6 5', opacity: 0.4 }}
+                    />
+                  ) : null}
+
+                  {/* Convergence point marker */}
+                  {convergencePoint && (
+                    <>
+                      <Circle center={[convergencePoint.lat, convergencePoint.lng]} radius={80}
+                        pathOptions={{ color: '#F5A623', fillColor: '#F5A623', fillOpacity: 0.12, weight: 1.5, dashArray: '4 4' }}
+                      />
+                      <Circle center={[convergencePoint.lat, convergencePoint.lng]} radius={28}
+                        pathOptions={{ color: '#D4880A', fillColor: '#F5A623', fillOpacity: 0.9, weight: 2 }}
+                      >
+                        <Popup><span className="font-sans text-xs font-semibold">Meet here</span></Popup>
+                      </Circle>
+                      {/* Shield → convergence dashed lines */}
+                      {shields
+                        .filter((s) => s.status === 'responding' && s.lat != null && s.lng != null)
+                        .map((s) => (
+                          <Polyline key={`route-${s.shield_id}`}
+                            positions={[[s.lat!, s.lng!], [convergencePoint.lat, convergencePoint.lng]]}
+                            pathOptions={{ color: '#7BB3A6', weight: 2, dashArray: '6 5', opacity: 0.65 }}
+                          />
+                        ))}
+                    </>
+                  )}
+
+                  <SOSMapFitter person={HEILBRONN} shields={shields} convergencePoint={convergencePoint} />
+                  <MapResizer />
+                </MapContainer>
+              </div>
+
+              {/* ── TOP overlay: status glass pill ── */}
+              <div className="absolute top-3 left-3 right-3 z-[1000] pointer-events-none">
+                <div className="bg-white/88 backdrop-blur-md rounded-2xl px-4 py-2.5 flex items-center justify-between shadow-lg border border-white/60">
+                  <div className="flex items-center gap-2">
+                    <span className="w-2 h-2 rounded-full bg-accent animate-pulse flex-shrink-0" />
+                    <span className="font-display text-sm text-ink leading-none">Help is on the way</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className={`font-sans text-[11px] px-2 py-0.5 rounded-full font-medium ${
+                      activeCount > 0 ? 'bg-sage/20 text-sage' : 'bg-ink/8 text-ink-muted'
+                    }`}>
+                      {activeCount > 0 ? `${activeCount} en route` : 'Locating…'}
+                    </span>
+                    {convergencePoint && (
+                      <span className="font-sans text-[11px] px-2 py-0.5 rounded-full bg-[#F5A623]/20 text-[#A86800] font-medium">
+                        Meet point set
+                      </span>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* ── BOTTOM overlay: legend + chips + button ── */}
+              <div className="absolute bottom-2 left-3 right-3 z-[1000]">
+                <div className="bg-white/92 backdrop-blur-xl rounded-2xl shadow-2xl border border-white/70 overflow-hidden">
+
+                  {/* Legend strip */}
+                  <div className="flex items-center gap-3 px-4 pt-3 pb-2">
+                    <span className="flex items-center gap-1.5 font-sans text-[10px] text-ink/60">
+                      <span className="w-2 h-2 rounded-full bg-accent flex-shrink-0" />You
+                    </span>
+                    <span className="flex items-center gap-1.5 font-sans text-[10px] text-ink/60">
+                      <span className="w-2 h-2 rounded-full bg-[#F5A623] flex-shrink-0" />Notified
+                    </span>
+                    <span className="flex items-center gap-1.5 font-sans text-[10px] text-ink/60">
+                      <span className="w-2 h-2 rounded-full bg-sage flex-shrink-0" />En route
+                    </span>
+                    {convergencePoint && (
+                      <span className="flex items-center gap-1.5 font-sans text-[10px] text-ink/60">
+                        <span className="w-2 h-2 rounded-full bg-[#F5A623] border border-[#D4880A] flex-shrink-0" />Meet here
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Divider */}
+                  <div className="h-px bg-ink/6 mx-4" />
+
+                  {/* Shield chip scroll */}
+                  <div className="overflow-x-auto px-3 py-2.5">
+                    <div className="flex gap-2" style={{ minWidth: 'max-content' }}>
+                      {shields.length === 0 ? (
+                        <>
+                          <Skeleton className="h-10 w-32 rounded-xl flex-shrink-0" />
+                          <Skeleton className="h-10 w-32 rounded-xl flex-shrink-0 animation-delay-100" />
+                          <Skeleton className="h-10 w-32 rounded-xl flex-shrink-0 animation-delay-200" />
+                        </>
+                      ) : sortedShields.slice(0, 3).map((s) => {
+                        const isDeclined = s.status === 'declined'
+                        const dotColor = s.status === 'responding' || s.status === 'arrived'
+                          ? 'bg-sage' : s.status === 'notified' ? 'bg-[#F5A623]' : 'bg-ink-muted/40'
+                        const etaText = s.status === 'arrived' ? 'Here'
+                          : s.eta_seconds != null ? `${Math.round(s.eta_seconds / 60)}m`
+                          : s.status === 'declined' ? '—' : '…'
+                        const statusText = s.status === 'responding' ? 'En route'
+                          : s.status === 'arrived' ? 'Arrived'
+                          : s.status === 'notified' ? 'Notified' : 'Unavailable'
+                        return (
+                          <div key={s.shield_id}
+                            className={`flex items-center gap-2 bg-white/70 border rounded-xl px-2.5 py-1.5 flex-shrink-0 ${
+                              isDeclined ? 'opacity-35 border-ink/5' : 'border-sage/25 shadow-sm'
+                            }`}
+                            style={{ width: 136 }}
+                          >
+                            <div className={`w-6 h-6 rounded-full flex items-center justify-center text-white font-sans font-bold text-[10px] flex-shrink-0 ${isDeclined ? 'bg-ink-muted/30' : 'bg-sage'}`}>
+                              {(s.name ?? 'S')[0].toUpperCase()}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <div className="font-sans text-[11px] font-semibold text-ink truncate leading-tight">
+                                {s.name?.split(' ')[0] || 'Shield'}
+                              </div>
+                              <div className="flex items-center gap-1 mt-0.5">
+                                <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${dotColor}`} />
+                                <span className="font-sans text-[9px] text-ink-muted leading-none">{statusText}</span>
+                              </div>
+                            </div>
+                            {!isDeclined && (
+                              <span className={`font-mono text-[9px] px-1.5 py-0.5 rounded-md flex-shrink-0 font-medium ${
+                                s.status === 'arrived' ? 'bg-sage/20 text-sage' : 'bg-greige text-ink-muted'
+                              }`}>
+                                {etaText}
+                              </span>
+                            )}
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Divider */}
+                  <div className="h-px bg-ink/6 mx-4" />
+
+                  {/* Safe button */}
+                  <div className="px-3 py-3">
+                    <button
+                      onClick={handleAllClear}
+                      className="w-full py-3 rounded-xl bg-sage text-white font-sans font-semibold text-sm transition-all hover:bg-sage/90 active:scale-[0.98] shadow-sm"
                     >
-                      <Popup>
-                        <div className="font-sans text-xs">
-                          <strong>{s.name || 'Shield'}</strong>
-                          <br />
-                          <span className="capitalize">{s.status}</span>
-                          {s.eta_seconds != null && (
-                            <> · {Math.round(s.eta_seconds / 60)} min</>
-                          )}
-                        </div>
-                      </Popup>
-                    </Marker>
-                  ))}
-                <SOSMapFitter person={HEILBRONN} shields={shields} />
-              </MapContainer>
-            </div>
+                      I'm safe now
+                    </button>
+                  </div>
+                </div>
+              </div>
 
-            {/* Map legend */}
-            <div className="mx-4 flex items-center gap-4 font-sans text-[11px] text-ink-muted">
-              <span className="flex items-center gap-1.5">
-                <span className="w-3 h-3 rounded-full bg-accent inline-block" />
-                You
-              </span>
-              <span className="flex items-center gap-1.5">
-                <span className="w-3 h-3 rounded-full bg-[#F5A623] inline-block" />
-                Notified
-              </span>
-              <span className="flex items-center gap-1.5">
-                <span className="w-3 h-3 rounded-full bg-sage inline-block" />
-                En route
-              </span>
             </div>
-
-            {/* Shield cards */}
-            <div className="mx-4 flex flex-col gap-2">
-              {shields.length === 0 ? (
-                <>
-                  <Skeleton className="h-[64px]" />
-                  <Skeleton className="h-[64px] animation-delay-100" />
-                </>
-              ) : (
-                shields.map((s, i) => (
-                  <ShieldCard key={s.shield_id} shield={s} index={i} />
-                ))
-              )}
-            </div>
-
-            <div className="mx-4 mb-2">
-              <button
-                onClick={handleAllClear}
-                className="w-full py-4 rounded-2xl bg-sage text-white font-sans font-semibold text-base transition-all hover:bg-sage/90 active:scale-95 shadow-sm"
-              >
-                I'm safe now
-              </button>
-            </div>
-          </div>
-        )}
+          )
+        })()}
 
         {/* ── RESOLVED ── */}
         {state === 'resolved' && (
@@ -439,6 +565,8 @@ export default function SOSLanding() {
                 setState('idle')
                 setIncidentId(null)
                 setShields([])
+                setConvergencePoint(null)
+                setPersonPolyline(null)
               }}
               className="font-sans text-sm text-ink-muted underline underline-offset-4 hover:text-ink transition-colors"
             >

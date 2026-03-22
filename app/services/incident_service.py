@@ -394,19 +394,8 @@ async def get_incident_detail(
     person_lat = float(person_loc["lat"]) if person_loc else incident.trigger_lat
     person_lng = float(person_loc["lng"]) if person_loc else incident.trigger_lng
 
-    # Person's encoded polyline to convergence point
+    # person_polyline is computed after shields_info is built (see below)
     person_polyline: str | None = None
-    if convergence_point is not None:
-        try:
-            directions = await navigation_service.get_directions(
-                person_lat, person_lng, conv_lat, conv_lng
-            )
-            person_polyline = directions["polyline"]
-        except Exception:
-            logger.exception(
-                "Failed to get person's polyline to convergence point for incident %s",
-                incident_id,
-            )
 
     # Per-shield ETAs to convergence point (responding shields only)
     shields_info: list[ShieldStatusInfo] = []
@@ -441,6 +430,24 @@ async def get_incident_detail(
                 eta_seconds=eta_seconds,
             )
         )
+
+    # Person → nearest responding shield (walking route via Google Directions)
+    responding_with_pos = [
+        s for s in shields_info
+        if s.status == "responding" and s.lat is not None and s.lng is not None
+    ]
+    if responding_with_pos:
+        nearest = min(responding_with_pos, key=lambda s: s.eta_seconds or 99999)
+        try:
+            directions = await navigation_service.get_directions(
+                person_lat, person_lng, nearest.lat, nearest.lng  # type: ignore[arg-type]
+            )
+            person_polyline = directions["polyline"]
+        except Exception:
+            logger.exception(
+                "Failed to get person's route to nearest shield for incident %s",
+                incident_id,
+            )
 
     return IncidentDetailResponse(
         incident_id=incident.id,

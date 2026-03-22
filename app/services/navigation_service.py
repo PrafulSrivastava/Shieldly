@@ -1,8 +1,8 @@
-"""Navigation service — convergence point calculation and Google Maps Directions API.
+"""Navigation service — convergence point calculation and Google Maps Routes API.
 
 Responsibilities:
   calculate_convergence_point  → weighted centroid (person 2x, each shield 1x)
-  get_directions               → Google Maps Directions API with MOCK_MAPS fallback
+  get_directions               → Google Maps Routes API with MOCK_MAPS fallback
   get_eta_seconds              → wraps get_directions; falls back to Haversine / 1.4 m/s
 """
 
@@ -17,7 +17,9 @@ from app.utils.geo import haversine_distance
 logger = logging.getLogger(__name__)
 
 _WALKING_SPEED_MS: float = 1.4  # metres per second ≈ 5 km/h
-_DIRECTIONS_API_URL = "https://maps.googleapis.com/maps/api/directions/json"
+_ROUTES_API_URL = "https://routes.googleapis.com/directions/v2:computeRoutes"
+_ROUTES_FIELD_MASK = "routes.duration,routes.distanceMeters,routes.polyline.encodedPolyline"
+_OSRM_API_URL = "https://router.project-osrm.org/route/v1/foot/{lng1},{lat1};{lng2},{lat2}"
 _HTTP_TIMEOUT = 10.0  # seconds
 
 
@@ -71,34 +73,43 @@ async def get_directions(
     if settings.mock_maps:
         return _mock_directions(origin_lat, origin_lng, dest_lat, dest_lng)
 
-    params = {
-        "origin": f"{origin_lat},{origin_lng}",
-        "destination": f"{dest_lat},{dest_lng}",
-        "mode": "walking",
-        "key": settings.google_maps_api_key,
+    body = {
+        "origin": {"location": {"latLng": {"latitude": origin_lat, "longitude": origin_lng}}},
+        "destination": {"location": {"latLng": {"latitude": dest_lat, "longitude": dest_lng}}},
+        "travelMode": "WALK",
+        "languageCode": "en-US",
+        "units": "METRIC",
+    }
+    headers = {
+        "X-Goog-Api-Key": settings.google_maps_api_key,
+        "X-Goog-FieldMask": _ROUTES_FIELD_MASK,
+        "Content-Type": "application/json",
     }
 
-    async with httpx.AsyncClient(timeout=_HTTP_TIMEOUT) as client:
-        resp = await client.get(_DIRECTIONS_API_URL, params=params)
-        resp.raise_for_status()
+    try:
+        async with httpx.AsyncClient(timeout=_HTTP_TIMEOUT) as client:
+            resp = await client.post(_ROUTES_API_URL, json=body, headers=headers)
+            resp.raise_for_status()
 
-    data: dict[str, Any] = resp.json()
-    status: str = data.get("status", "UNKNOWN")
+        data: dict[str, Any] = resp.json()
+        if not data.get("routes"):
+            raise ValueError(f"Routes API returned no routes: {data!r}")
 
-    if status != "OK" or not data.get("routes"):
-        raise ValueError(f"Directions API returned non-OK status: {status!r}")
-
-    route = data["routes"][0]
-    leg = route["legs"][0]
-    polyline: str = route["overview_polyline"]["points"]
-    steps: list[str] = [step["html_instructions"] for step in leg.get("steps", [])]
-
-    return {
-        "distance_meters": int(leg["distance"]["value"]),
-        "duration_seconds": int(leg["duration"]["value"]),
-        "polyline": polyline,
-        "steps": steps,
-    }
+        route = data["routes"][0]
+        duration_str: str = route.get("duration", "0s")
+        duration_seconds = int(duration_str.rstrip("s"))
+        encoded_polyline: str = route["polyline"]["encodedPolyline"]
+        return {
+            "distance_meters": int(route.get("distanceMeters", 0)),
+            "duration_seconds": duration_seconds,
+            "polyline": encoded_polyline,
+            "steps": [],
+        }
+    except Exception as google_exc:
+        logger.warning(
+            "Google Routes API failed (%s) — falling back to OSRM", google_exc
+        )
+        return await _osrm_directions(origin_lat, origin_lng, dest_lat, dest_lng)
 
 
 async def get_eta_seconds(
@@ -126,6 +137,35 @@ async def get_eta_seconds(
 
 
 # ── Internal helpers ──────────────────────────────────────────────────────────
+
+async def _osrm_directions(
+    origin_lat: float,
+    origin_lng: float,
+    dest_lat: float,
+    dest_lng: float,
+) -> dict[str, Any]:
+    """Fetch walking directions from the public OSRM demo server (no API key needed)."""
+    url = _OSRM_API_URL.format(
+        lng1=origin_lng, lat1=origin_lat,
+        lng2=dest_lng,   lat2=dest_lat,
+    )
+    params = {"overview": "full", "geometries": "polyline"}
+    async with httpx.AsyncClient(timeout=_HTTP_TIMEOUT) as client:
+        resp = await client.get(url, params=params)
+        resp.raise_for_status()
+
+    data: dict[str, Any] = resp.json()
+    if data.get("code") != "Ok" or not data.get("routes"):
+        raise ValueError(f"OSRM returned no routes: {data!r}")
+
+    route = data["routes"][0]
+    return {
+        "distance_meters": int(route.get("distance", 0)),
+        "duration_seconds": int(route.get("duration", 0)),
+        "polyline": route["geometry"],
+        "steps": [],
+    }
+
 
 def _mock_directions(
     origin_lat: float,

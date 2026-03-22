@@ -48,6 +48,7 @@ export interface IncidentDetail {
   resolved_at: string | null
   shields_notified: number
   shields: ShieldStatusInfo[]
+  person_polyline: string | null
 }
 
 export const triggerSOS = (lat: number, lng: number) =>
