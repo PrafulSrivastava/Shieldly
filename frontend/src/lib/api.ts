@@ -127,6 +127,8 @@ export const api = {
 
   seedHotspots: () => request<unknown>("POST", "/api/v1/dev/seed-hotspots"),
 
+  seed100Shields: () => request<unknown>("POST", "/api/v1/dev/seed-100-shields"),
+
   mockShieldRespond: (incidentId: string, shieldId: string) =>
     request<unknown>(
       "POST",

@@ -5,6 +5,7 @@ production — the endpoints bypass auth and exist purely for local verification
 """
 
 import logging
+import math
 import random
 from datetime import datetime, timezone
 from uuid import UUID, uuid4
@@ -344,6 +345,38 @@ async def trigger_test_sos(
         background_tasks=background_tasks,
     )
     logger.info("[DEV] Tracking URL: %s", result.tracking_url)
+
+    # Auto-respond the 3 closest notified shields so the demo shows activity
+    notified_rows = (
+        await db.execute(
+            select(IncidentResponse, Shield)
+            .join(Shield, IncidentResponse.shield_id == Shield.id)
+            .where(
+                IncidentResponse.incident_id == result.incident_id,
+                IncidentResponse.status == "notified",
+            )
+        )
+    ).all()
+
+    ranked = sorted(
+        [(ir, sh) for ir, sh in notified_rows if sh.current_lat is not None],
+        key=lambda pair: (
+            (pair[1].current_lat - _CENTRE_LAT) ** 2
+            + (pair[1].current_lng - _CENTRE_LNG) ** 2
+        ),
+    )
+
+    for _ir, sh in ranked[:3]:
+        try:
+            await incident_service.update_response_status(
+                sh, result.incident_id, "responding", db=db, redis=redis
+            )
+            logger.info("[DEV] Auto-responded shield %s", sh.id)
+        except Exception:
+            logger.exception("[DEV] Auto-respond failed for shield %s", sh.id)
+
+    await db.commit()
+
     return result
 
 
@@ -525,3 +558,178 @@ async def seed_hotspots(
 
     logger.info("Seeded %d hotspot cell(s) for Stuttgart route", len(cells))
     return SeedHotspotsResponse(seeded=True, cells=cells)
+
+
+# ── 100-Shield Heilbronn seed ─────────────────────────────────────────────
+
+_SEED100_PHONE_PREFIX = "+49180000"
+
+_GERMAN_FIRST_NAMES: list[str] = [
+    "Anna", "Lena", "Marie", "Sophie", "Laura", "Mia", "Emma", "Clara",
+    "Luisa", "Johanna", "Katharina", "Julia", "Sarah", "Lisa", "Nina",
+    "Lea", "Maja", "Elena", "Amelie", "Frieda", "Hanna", "Nora", "Ida",
+    "Lina", "Ella", "Emilia", "Mila", "Alina", "Jana", "Pia", "Greta",
+    "Theresa", "Marlene", "Helene", "Antonia", "Pauline", "Charlotte",
+    "Eva", "Isabella", "Carla", "Stella", "Valentina", "Rosa", "Sophia",
+    "Paula", "Fiona", "Elisa", "Mara", "Lotta", "Merle", "Annika",
+    "Tessa", "Helena", "Vivien", "Klara", "Selina", "Diana", "Miriam",
+    "Andrea", "Bianca", "Celine", "Doris", "Erika", "Franziska", "Gabi",
+    "Heidi", "Ines", "Jasmin", "Karen", "Linda", "Monika", "Nadine",
+    "Olivia", "Petra", "Rita", "Sabine", "Tanja", "Ursula", "Vera",
+    "Waltraud", "Xenia", "Yvonne", "Zara", "Beate", "Dagmar", "Edith",
+    "Frauke", "Gerda", "Hilde", "Ilse", "Jutta", "Karin", "Lotte",
+    "Margit", "Renate", "Silke", "Traude", "Ute", "Wiebke", "Agnes",
+    "Britta",
+]
+
+_HEILBRONN_CLUSTERS: list[tuple[float, float, int, float]] = [
+    # (center_lat, center_lng, count, spread_meters)
+    (49.1427, 9.2109, 25, 400),    # Altstadt / Innenstadt
+    (49.1380, 9.1850, 15, 350),    # Böckingen
+    (49.1260, 9.2280, 12, 300),    # Sontheim
+    (49.1570, 9.1900, 10, 350),    # Neckargartach
+    (49.1650, 9.1800, 8,  300),    # Frankenbach
+    (49.1200, 9.2100, 5,  250),    # Horkheim
+    (49.1427, 9.2109, 25, 1500),   # Wide random spread
+]
+
+
+def _generate_shield_positions() -> list[tuple[float, float]]:
+    """Generate 100 shield positions across Heilbronn neighbourhoods."""
+    cos_lat = math.cos(math.radians(_CENTRE_LAT))
+    positions: list[tuple[float, float]] = []
+
+    for clat, clng, count, spread_m in _HEILBRONN_CLUSTERS:
+        lat_sigma = spread_m / 111_320
+        lng_sigma = spread_m / (111_320 * cos_lat)
+        for _ in range(count):
+            lat = round(clat + random.gauss(0, lat_sigma), 6)
+            lng = round(clng + random.gauss(0, lng_sigma), 6)
+            positions.append((lat, lng))
+
+    return positions
+
+
+class Seed100Response(BaseModel):
+    seeded: bool
+    shield_count: int
+    person: SeedUserInfo
+
+
+async def _delete_100_seed_data(db: AsyncSession) -> None:
+    """Remove all rows created by the 100-shield seed."""
+    result = await db.execute(
+        select(User).where(User.phone.like(f"{_SEED100_PHONE_PREFIX}%"))
+    )
+    users = result.scalars().all()
+    if not users:
+        return
+
+    user_ids = [u.id for u in users]
+
+    incidents = (
+        await db.execute(
+            select(Incident).where(Incident.triggered_by.in_(user_ids))
+        )
+    ).scalars().all()
+    incident_ids = [i.id for i in incidents]
+
+    if incident_ids:
+        await db.execute(
+            delete(IncidentResponse).where(
+                IncidentResponse.incident_id.in_(incident_ids)
+            )
+        )
+        await db.execute(
+            delete(Incident).where(Incident.id.in_(incident_ids))
+        )
+
+    await db.execute(delete(Shield).where(Shield.user_id.in_(user_ids)))
+    await db.execute(delete(User).where(User.id.in_(user_ids)))
+    await db.flush()
+
+
+@router.post(
+    "/dev/seed-100-shields",
+    response_model=Seed100Response,
+    summary="Seed 100 Shields spread across Heilbronn",
+    description=(
+        "Removes any previous 100-seed data, ensures the test Person exists, "
+        "then creates 100 verified Shields distributed across Heilbronn "
+        "neighbourhoods (Altstadt, Böckingen, Sontheim, Neckargartach, "
+        "Frankenbach, Horkheim) plus a wide random spread. All locations are "
+        "written to Redis so they appear immediately. **Development only.**"
+    ),
+)
+async def seed_100_shields(
+    db: AsyncSession = Depends(get_db),
+    redis: aioredis.Redis = Depends(get_redis),
+) -> Seed100Response:
+    await _delete_100_seed_data(db)
+
+    now = datetime.now(timezone.utc)
+
+    # Ensure test person exists
+    result = await db.execute(select(User).where(User.phone == _PERSON_PHONE))
+    person: User | None = result.scalar_one_or_none()
+    if person is None:
+        person = User(
+            id=uuid4(),
+            phone=_PERSON_PHONE,
+            name="Test Person",
+            role=UserRole.person,
+            firebase_uid=f"mock-uid-{_PERSON_PHONE}",
+            emergency_contact_name="Emergency Contact",
+            emergency_contact_phone="+491700000099",
+            is_active=True,
+        )
+        db.add(person)
+        await db.flush()
+
+    positions = _generate_shield_positions()
+    names = list(_GERMAN_FIRST_NAMES)
+    random.shuffle(names)
+
+    for idx, (lat, lng) in enumerate(positions):
+        phone = f"{_SEED100_PHONE_PREFIX}{idx + 1:04d}"
+        name = names[idx % len(names)]
+
+        user = User(
+            id=uuid4(),
+            phone=phone,
+            name=name,
+            role=UserRole.shield,
+            firebase_uid=f"mock-uid-{phone}",
+            is_active=True,
+        )
+        db.add(user)
+        await db.flush()
+
+        shield = Shield(
+            id=uuid4(),
+            user_id=user.id,
+            status=ShieldStatus.active,
+            id_verified=True,
+            commitment_signed=True,
+            current_lat=lat,
+            current_lng=lng,
+            location_updated_at=now,
+            expo_push_token=f"ExponentPushToken[SEED100_{idx:04d}_FAKE]",
+            token_updated_at=now,
+        )
+        db.add(shield)
+        await db.flush()
+
+        await update_shield_location(str(shield.id), lat, lng, redis=redis)
+
+    logger.info("100-shield seed complete: %d shields across Heilbronn", len(positions))
+    return Seed100Response(
+        seeded=True,
+        shield_count=len(positions),
+        person=SeedUserInfo(
+            user_id=person.id,
+            phone=person.phone,
+            name=person.name,
+            role=person.role.value,
+        ),
+    )

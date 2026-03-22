@@ -38,7 +38,49 @@ logger = logging.getLogger(__name__)
 _LOCATION_TTL = 300  # seconds — matches the "5 min stale" rule
 _STALE_THRESHOLD = timedelta(minutes=5)
 _MIN_SHIELDS_NEAR = 3
-_MAX_SEARCH_RADIUS_KM = 3.0
+_MAX_SEARCH_RADIUS_KM = 5.0
+
+
+# ── Startup hydration (dev mode) ─────────────────────────────────────────────
+
+async def hydrate_shield_locations_from_db(redis: aioredis.Redis) -> int:
+    """Load all active shield locations from Postgres into Redis.
+
+    Called once at startup in development mode so shields are immediately
+    discoverable without re-seeding.  Also refreshes location_updated_at
+    so the stale-location filter passes.
+    Returns the number of shields hydrated.
+    """
+    now = datetime.now(timezone.utc)
+    count = 0
+
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(
+            select(Shield).where(
+                Shield.status == ShieldStatus.active,
+                Shield.id_verified.is_(True),
+                Shield.current_lat.isnot(None),
+                Shield.current_lng.isnot(None),
+            )
+        )
+        shields = result.scalars().all()
+
+        for shield in shields:
+            key = _shield_location_key(str(shield.id))
+            await redis.hset(key, mapping={
+                "lat": shield.current_lat,
+                "lng": shield.current_lng,
+                "updated_at": now.isoformat(),
+            })
+            await redis.expire(key, _LOCATION_TTL)
+
+            shield.location_updated_at = now
+            count += 1
+
+        await db.commit()
+
+    logger.info("Hydrated %d shield locations from Postgres into Redis", count)
+    return count
 
 
 # ── Redis key builders ────────────────────────────────────────────────────────

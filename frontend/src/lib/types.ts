@@ -44,6 +44,14 @@ export interface ShieldStatusInfo {
   eta_seconds: number | null;
 }
 
+export interface RouteToNearestShield {
+  shield_id: string;
+  shield_name: string;
+  distance_meters: number;
+  duration_seconds: number;
+  route_points: [number, number][];
+}
+
 export interface IncidentDetailResponse {
   incident_id: string;
   status: "active" | "resolved" | "escalated";
@@ -56,6 +64,7 @@ export interface IncidentDetailResponse {
   shields: ShieldStatusInfo[];
   person_polyline: string | null;
   tracking_url: string;
+  route_to_nearest_shield: RouteToNearestShield | null;
 }
 
 export interface IncidentContextResponse {

@@ -20,10 +20,11 @@ export function NavigationArrow({ position, target, heading, label }: Props) {
     distance = haversine(position, target);
   }
 
+  const displayDist = Math.max(distance, 50);
   const distStr =
-    distance >= 1_000
-      ? `${(distance / 1_000).toFixed(1)}km`
-      : `${Math.round(distance)}m`;
+    displayDist >= 1_000
+      ? `${(displayDist / 1_000).toFixed(1)}km`
+      : `${Math.round(displayDist)}m`;
 
   return (
     <div className="flex flex-col items-center gap-5">

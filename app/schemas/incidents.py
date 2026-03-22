@@ -82,6 +82,14 @@ class ShieldStatusInfo(BaseModel):
     eta_seconds: int | None = None
 
 
+class RouteToNearestShield(BaseModel):
+    shield_id: UUID
+    shield_name: str
+    distance_meters: int
+    duration_seconds: int
+    route_points: list[list[float]]
+
+
 class IncidentDetailResponse(BaseModel):
     incident_id: UUID
     status: str
@@ -94,3 +102,4 @@ class IncidentDetailResponse(BaseModel):
     shields: list[ShieldStatusInfo]
     person_polyline: str | None = None
     tracking_url: str | None = None
+    route_to_nearest_shield: RouteToNearestShield | None = None

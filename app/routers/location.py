@@ -170,5 +170,5 @@ async def get_nearby_shields(
 
     Used by the frontend to display shield blips on the idle-phase mini-map.
     """
-    nearby = await get_active_shields_near(lat, lng, radius_km=1.0, db=db)
+    nearby = await get_active_shields_near(lat, lng, radius_km=3.0, db=db)
     return [NearbyShieldResponse(**s) for s in nearby]

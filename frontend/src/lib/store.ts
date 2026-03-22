@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-import type { ConvergencePoint, ShieldStatusInfo, LatLng } from "./types";
+import type { ConvergencePoint, ShieldStatusInfo, LatLng, RouteToNearestShield } from "./types";
 
 export type AppPhase = "idle" | "active" | "resolved";
 
@@ -26,6 +26,7 @@ interface AppState {
   liveShields: ShieldStatusInfo[];
   liveConvergence: ConvergencePoint | null;
   livePersonPos: LatLng | null;
+  liveRouteToShield: RouteToNearestShield | null;
 
   setAuth: (
     token: string,
@@ -41,6 +42,7 @@ interface AppState {
   setLiveShields: (shields: ShieldStatusInfo[]) => void;
   setLiveConvergence: (point: ConvergencePoint | null) => void;
   setLivePersonPos: (pos: LatLng | null) => void;
+  setLiveRouteToShield: (route: RouteToNearestShield | null) => void;
   patchLiveShield: (
     shieldId: string,
     lat: number,
@@ -64,6 +66,7 @@ export const useStore = create<AppState>()(
       liveShields: [],
       liveConvergence: null,
       livePersonPos: null,
+      liveRouteToShield: null,
 
       setAuth: (token, userId, role, phone) =>
         set({ token, userId, role, phone }),
@@ -76,6 +79,7 @@ export const useStore = create<AppState>()(
       setLiveShields: (shields) => set({ liveShields: shields }),
       setLiveConvergence: (point) => set({ liveConvergence: point }),
       setLivePersonPos: (pos) => set({ livePersonPos: pos }),
+      setLiveRouteToShield: (route) => set({ liveRouteToShield: route }),
       patchLiveShield: (shieldId, lat, lng) =>
         set((s) => ({
           liveShields: s.liveShields.map((sh) =>

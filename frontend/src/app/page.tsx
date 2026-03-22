@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useCallback, useState } from "react";
+import { useEffect, useCallback, useState, useRef } from "react";
 import dynamic from "next/dynamic";
 import { useStore } from "@/lib/store";
 import { api } from "@/lib/api";
@@ -38,6 +38,8 @@ export default function HomePage() {
     setLiveShields,
     liveConvergence,
     setLiveConvergence,
+    liveRouteToShield,
+    setLiveRouteToShield,
   } = useStore();
 
   const { position, error: geoError } = useGeolocation();
@@ -48,6 +50,11 @@ export default function HomePage() {
   >([]);
   const [convergenceLabel, setConvergenceLabel] = useState<string | null>(null);
   const [hovered, setHovered] = useState(false);
+
+  const demoStartedRef = useRef(false);
+  const demoIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const posRef = useRef(position);
+  posRef.current = position;
 
   /* ── Auto-auth (dev mock) ──────────────────────────────────────────── */
 
@@ -91,7 +98,8 @@ export default function HomePage() {
         .catch(() => {});
       api
         .getNearbyShields(position.lat, position.lng)
-        .then((shields) =>
+        .then((shields) => {
+          if (demoStartedRef.current) return;
           setNearbyShields(
             shields.map((s) => ({
               shield_id: s.shield_id,
@@ -101,14 +109,70 @@ export default function HomePage() {
               status: "active",
               eta_seconds: null,
             })),
-          ),
-        )
+          );
+        })
         .catch(() => {});
     };
     poll();
     const id = setInterval(poll, 30_000);
     return () => clearInterval(id);
   }, [phase, position]);
+
+  /* ── Demo simulation: shields respond & approach after 10 s ──────── */
+
+  useEffect(() => {
+    if (phase !== "idle") {
+      demoStartedRef.current = false;
+      if (demoIntervalRef.current) {
+        clearInterval(demoIntervalRef.current);
+        demoIntervalRef.current = null;
+      }
+      return;
+    }
+
+    if (demoStartedRef.current || nearbyShields.length < 5) return;
+
+    const timeout = setTimeout(() => {
+      demoStartedRef.current = true;
+
+      const shuffled = [...nearbyShields].sort(() => Math.random() - 0.5);
+      const count = Math.min(4 + Math.floor(Math.random() * 3), shuffled.length);
+      const respondingSet = new Set(
+        shuffled.slice(0, count).map((s) => s.shield_id),
+      );
+
+      setNearbyShields((prev) =>
+        prev.map((s) =>
+          respondingSet.has(s.shield_id)
+            ? { ...s, status: "responding" }
+            : s,
+        ),
+      );
+
+      demoIntervalRef.current = setInterval(() => {
+        const pos = posRef.current;
+        if (!pos) return;
+        setNearbyShields((prev) =>
+          prev.map((s) => {
+            if (!respondingSet.has(s.shield_id)) return s;
+            return {
+              ...s,
+              lat: s.lat + (pos.lat - s.lat) * 0.035,
+              lng: s.lng + (pos.lng - s.lng) * 0.035,
+            };
+          }),
+        );
+      }, 800);
+    }, 3_000);
+
+    return () => {
+      clearTimeout(timeout);
+      if (demoIntervalRef.current) {
+        clearInterval(demoIntervalRef.current);
+        demoIntervalRef.current = null;
+      }
+    };
+  }, [phase, nearbyShields.length]);
 
   /* ── Active-incident wiring ────────────────────────────────────────── */
 
@@ -212,6 +276,7 @@ export default function HomePage() {
       setIncident(null);
       setLiveShields([]);
       setLiveConvergence(null);
+      setLiveRouteToShield(null);
       setConvergenceLabel(null);
     }, 3_000);
   }, [
@@ -221,6 +286,7 @@ export default function HomePage() {
     setIncident,
     setLiveShields,
     setLiveConvergence,
+    setLiveRouteToShield,
   ]);
 
   /* ── Derived ───────────────────────────────────────────────────────── */
@@ -300,6 +366,7 @@ export default function HomePage() {
             shields={allIncidentShields}
             convergence={convergence}
             respondingCount={respondingShields.length}
+            routeToShield={liveRouteToShield}
             embedded
           />
         )}

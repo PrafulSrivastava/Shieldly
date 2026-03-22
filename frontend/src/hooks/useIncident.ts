@@ -8,7 +8,7 @@ const POLL_MS = 5_000;
 const LOCATION_PUSH_MS = 8_000;
 
 export function useIncidentPolling(incidentId: string | null) {
-  const { setLiveShields, setLiveConvergence, setPhase, setIncident } =
+  const { setLiveShields, setLiveConvergence, setLiveRouteToShield, setPhase, setIncident } =
     useStore();
   const intervalRef = useRef<ReturnType<typeof setInterval>>();
 
@@ -23,6 +23,8 @@ export function useIncidentPolling(incidentId: string | null) {
         setLiveConvergence(detail.convergence_point);
       }
 
+      setLiveRouteToShield(detail.route_to_nearest_shield ?? null);
+
       if (detail.status === "resolved") {
         setPhase("resolved");
         setTimeout(() => {
@@ -33,7 +35,7 @@ export function useIncidentPolling(incidentId: string | null) {
     } catch {
       /* network hiccup — retry on next tick */
     }
-  }, [incidentId, setLiveShields, setLiveConvergence, setPhase, setIncident]);
+  }, [incidentId, setLiveShields, setLiveConvergence, setLiveRouteToShield, setPhase, setIncident]);
 
   useEffect(() => {
     if (!incidentId) return;

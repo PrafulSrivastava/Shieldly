@@ -28,6 +28,7 @@ from app.schemas.incidents import (
     IncidentDetailResponse,
     RespondingShieldInfo,
     RespondToIncidentResponse,
+    RouteToNearestShield,
     ShieldStatusInfo,
     TriggerSOSResponse,
 )
@@ -508,6 +509,33 @@ async def get_incident_detail(
     if requesting_user_id is not None and incident.triggered_by == requesting_user_id:
         tracking_url = generate_tracking_url(incident.tracking_token)
 
+    route_to_nearest: RouteToNearestShield | None = None
+    responding_with_pos = [
+        s for s in shields_info
+        if s.status == "responding" and s.lat is not None and s.lng is not None
+    ]
+    if responding_with_pos:
+        closest = min(
+            responding_with_pos,
+            key=lambda s: haversine_distance(person_lat, person_lng, s.lat, s.lng),  # type: ignore[arg-type]
+        )
+        try:
+            route_data = await navigation_service.get_route_to_point(
+                person_lat, person_lng, closest.lat, closest.lng,  # type: ignore[arg-type]
+            )
+            route_to_nearest = RouteToNearestShield(
+                shield_id=closest.shield_id,
+                shield_name=closest.name,
+                distance_meters=route_data["distance_meters"],
+                duration_seconds=route_data["duration_seconds"],
+                route_points=route_data["route_points"],
+            )
+        except Exception:
+            logger.exception(
+                "Failed to compute route to nearest shield for incident %s",
+                incident_id,
+            )
+
     return IncidentDetailResponse(
         incident_id=incident.id,
         status=incident.status.value,
@@ -520,6 +548,7 @@ async def get_incident_detail(
         shields=shields_info,
         person_polyline=person_polyline,
         tracking_url=tracking_url,
+        route_to_nearest_shield=route_to_nearest,
     )
 
 

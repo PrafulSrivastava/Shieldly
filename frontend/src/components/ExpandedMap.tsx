@@ -1,18 +1,20 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState, useRef } from "react";
 import {
   MapContainer,
   TileLayer,
   Marker,
   Circle,
   Popup,
+  Polyline,
   useMap,
 } from "react-leaflet";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { X } from "lucide-react";
-import type { LatLng, ShieldStatusInfo } from "@/lib/types";
+import type { LatLng, ShieldStatusInfo, RouteToNearestShield } from "@/lib/types";
+import { haversine } from "@/lib/types";
 
 /* ── Custom Leaflet icons — warm editorial ───────────────────────────── */
 
@@ -47,9 +49,9 @@ function shieldIconColors(status: string): {
       };
     case "notified":
       return {
-        bg: "rgba(251,191,36,0.2)",
-        border: "#FBBF24",
-        text: "#92400E",
+        bg: "rgba(74,222,128,0.2)",
+        border: "#4ADE80",
+        text: "#166534",
       };
     default:
       return {
@@ -103,8 +105,37 @@ interface Props {
   shields: ShieldStatusInfo[];
   convergence: LatLng | null;
   respondingCount: number;
+  routeToShield?: RouteToNearestShield | null;
   onClose?: () => void;
   embedded?: boolean;
+}
+
+async function fetchWalkingRoute(
+  from: LatLng,
+  to: { lat: number; lng: number },
+): Promise<{
+  route_points: [number, number][];
+  distance_meters: number;
+  duration_seconds: number;
+} | null> {
+  try {
+    const url = `https://router.project-osrm.org/route/v1/foot/${from.lng},${from.lat};${to.lng},${to.lat}?overview=full&geometries=geojson`;
+    const res = await fetch(url);
+    if (!res.ok) return null;
+    const data = await res.json();
+    if (data.code !== "Ok" || !data.routes?.length) return null;
+    const route = data.routes[0];
+    const coords: [number, number][] = route.geometry.coordinates.map(
+      ([lng, lat]: [number, number]) => [lat, lng] as [number, number],
+    );
+    return {
+      route_points: coords,
+      distance_meters: Math.round(route.distance),
+      duration_seconds: Math.round(route.duration),
+    };
+  } catch {
+    return null;
+  }
 }
 
 export default function ExpandedMap({
@@ -112,9 +143,45 @@ export default function ExpandedMap({
   shields,
   convergence,
   respondingCount,
+  routeToShield,
   onClose,
   embedded,
 }: Props) {
+  const [fallbackRoute, setFallbackRoute] = useState<RouteToNearestShield | null>(null);
+  const fetchIdRef = useRef(0);
+
+  useEffect(() => {
+    if (routeToShield || shields.length === 0) {
+      setFallbackRoute(null);
+      return;
+    }
+    const closest = shields.reduce((best, sh) => {
+      const d = haversine(position, { lat: sh.lat, lng: sh.lng });
+      const bd = haversine(position, { lat: best.lat, lng: best.lng });
+      return d < bd ? sh : best;
+    }, shields[0]);
+
+    const id = ++fetchIdRef.current;
+
+    fetchWalkingRoute(position, closest).then((result) => {
+      if (id !== fetchIdRef.current) return;
+      if (!result) return;
+      setFallbackRoute({
+        shield_id: closest.shield_id,
+        shield_name: closest.name,
+        distance_meters: result.distance_meters,
+        duration_seconds: result.duration_seconds,
+        route_points: result.route_points,
+      });
+    });
+  }, [routeToShield, shields, position]);
+
+  const effectiveRoute = routeToShield ?? fallbackRoute;
+
+  const routeLatLngs: L.LatLngTuple[] | null =
+    effectiveRoute?.route_points?.length
+      ? effectiveRoute.route_points.map(([lat, lng]) => [lat, lng] as L.LatLngTuple)
+      : null;
   return (
     <div
       className={
@@ -190,6 +257,21 @@ export default function ExpandedMap({
           </Marker>
         ))}
 
+        {/* Route to nearest shield */}
+        {routeLatLngs && (
+          <Polyline
+            positions={routeLatLngs}
+            pathOptions={{
+              color: "#6B2E4F",
+              weight: 4,
+              opacity: 0.7,
+              dashArray: "8 6",
+              lineCap: "round",
+              lineJoin: "round",
+            }}
+          />
+        )}
+
         {/* Convergence */}
         {convergence && (
           <Marker
@@ -202,6 +284,27 @@ export default function ExpandedMap({
           </Marker>
         )}
       </MapContainer>
+
+      {/* Route info card */}
+      {effectiveRoute && (
+        <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-[1000]">
+          <div className="bg-white/90 backdrop-blur-md rounded-2xl border border-lavender-muted shadow-soft px-4 py-2.5 flex items-center gap-3">
+            <div className="w-8 h-8 rounded-full bg-plum/10 border border-plum/20 flex items-center justify-center">
+              <svg className="w-4 h-4 text-plum" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M5 12h14M12 5l7 7-7 7"/>
+              </svg>
+            </div>
+            <div className="flex flex-col">
+              <span className="font-body text-[11px] text-plum font-semibold tracking-[0.04em]">
+                Walking to {effectiveRoute.shield_name}
+              </span>
+              <span className="font-body text-[10px] text-warm-muted/60 tracking-[0.06em]">
+                {Math.ceil(effectiveRoute.duration_seconds / 60)} min · {effectiveRoute.distance_meters} m
+              </span>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

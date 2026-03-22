@@ -19,7 +19,7 @@ function shieldColor(status: string): string {
     case "declined":
       return "#F87171";
     case "notified":
-      return "#FBBF24";
+      return "#4ADE80";
     default:
       return "#B8CFC0";
   }

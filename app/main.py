@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator
@@ -7,22 +8,46 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
 from app.database import engine
+from app import redis_client as redis_mod
 from app.redis_client import close_redis, init_redis
 from app.routers import admin, auth, hotspots, incidents, location, shields, tracking
 from app.routers import dev as dev_router
 
 logger = logging.getLogger(__name__)
 
+_hydration_task: asyncio.Task[None] | None = None
+
+
+async def _periodic_hydration() -> None:
+    """Re-hydrate shield locations every 4 minutes so Redis keys never go stale."""
+    from app.services.location_service import hydrate_shield_locations_from_db
+
+    while True:
+        await asyncio.sleep(240)
+        try:
+            if redis_mod.redis_client is not None:
+                await hydrate_shield_locations_from_db(redis_mod.redis_client)
+        except Exception:
+            logger.exception("Periodic shield hydration failed")
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
+    global _hydration_task
     logger.info("Starting ShieldHer API (env=%s)", settings.app_env)
 
     await init_redis(settings.redis_url)
 
+    if settings.is_development and redis_mod.redis_client is not None:
+        from app.services.location_service import hydrate_shield_locations_from_db
+        await hydrate_shield_locations_from_db(redis_mod.redis_client)
+        _hydration_task = asyncio.create_task(_periodic_hydration())
+
     yield  # ── application is running ──
 
     logger.info("Shutting down ShieldHer API")
+    if _hydration_task is not None:
+        _hydration_task.cancel()
     await close_redis()
     await engine.dispose()
     logger.info("Connections closed")

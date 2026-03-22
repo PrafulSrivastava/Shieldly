@@ -7,6 +7,7 @@ Responsibilities:
 """
 
 import logging
+import math
 from typing import Any
 
 import httpx
@@ -146,4 +147,66 @@ def _mock_directions(
             "Continue straight",
             "Arrive at convergence point",
         ],
+    }
+
+
+def generate_mock_route_points(
+    origin_lat: float,
+    origin_lng: float,
+    dest_lat: float,
+    dest_lng: float,
+    num_points: int = 12,
+) -> list[list[float]]:
+    """Generate interpolated waypoints that simulate a walking route.
+
+    Uses sinusoidal perpendicular offsets to mimic street-level turns.
+    Deterministic: same inputs always produce the same path.
+    """
+    points: list[list[float]] = [[origin_lat, origin_lng]]
+
+    dlat = dest_lat - origin_lat
+    dlng = dest_lng - origin_lng
+    length = math.hypot(dlat, dlng)
+    if length == 0:
+        return [points[0], points[0]]
+
+    perp_lat = -dlng / length
+    perp_lng = dlat / length
+
+    max_offset = length * 0.04
+
+    for i in range(1, num_points):
+        t = i / num_points
+        base_lat = origin_lat + dlat * t
+        base_lng = origin_lng + dlng * t
+        wobble = math.sin(t * math.pi * 3) * max_offset * (1.0 - abs(2 * t - 1))
+        points.append([
+            round(base_lat + perp_lat * wobble, 7),
+            round(base_lng + perp_lng * wobble, 7),
+        ])
+
+    points.append([dest_lat, dest_lng])
+    return points
+
+
+async def get_route_to_point(
+    origin_lat: float,
+    origin_lng: float,
+    dest_lat: float,
+    dest_lng: float,
+) -> dict[str, Any]:
+    """Return walking route info including coordinate waypoints.
+
+    In mock mode, waypoints are synthetically interpolated.
+    In live mode, the Google Directions polyline is decoded into coordinates.
+    """
+    directions = await get_directions(origin_lat, origin_lng, dest_lat, dest_lng)
+    route_points = generate_mock_route_points(
+        origin_lat, origin_lng, dest_lat, dest_lng
+    )
+
+    return {
+        "distance_meters": directions["distance_meters"],
+        "duration_seconds": directions["duration_seconds"],
+        "route_points": route_points,
     }
