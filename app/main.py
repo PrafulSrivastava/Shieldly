@@ -38,10 +38,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     await init_redis(settings.redis_url)
 
-    if settings.is_development and redis_mod.redis_client is not None:
+    if redis_mod.redis_client is not None:
         from app.services.location_service import hydrate_shield_locations_from_db
-        await hydrate_shield_locations_from_db(redis_mod.redis_client)
-        _hydration_task = asyncio.create_task(_periodic_hydration())
+        try:
+            await hydrate_shield_locations_from_db(redis_mod.redis_client)
+            _hydration_task = asyncio.create_task(_periodic_hydration())
+        except Exception:
+            logger.exception("Initial shield hydration failed — continuing without it")
 
     yield  # ── application is running ──
 
