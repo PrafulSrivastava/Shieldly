@@ -157,7 +157,15 @@ export default function HomePage() {
       fetch('http://127.0.0.1:7327/ingest/93b71a90-5ff3-415f-bd50-6d765b588235',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'ba3cdb'},body:JSON.stringify({sessionId:'ba3cdb',runId:'run1',hypothesisId:'H-E',location:'page.tsx:phase-to-active',message:'phase-changed-to-active',data:{incidentId:res.incident_id},timestamp:Date.now()})}).catch(()=>{});
       // #endregion
 
-      setTimeout(() => voice.start(), 600);
+      // #region agent log
+      fetch('http://127.0.0.1:7327/ingest/93b71a90-5ff3-415f-bd50-6d765b588235',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'e095e6'},body:JSON.stringify({sessionId:'e095e6',runId:'run1',hypothesisId:'H4',location:'page.tsx:before-voice-setTimeout',message:'scheduling voice.start',data:{incidentId:res.incident_id,hasVoiceStart:typeof voice.start},timestamp:Date.now()})}).catch(()=>{});
+      // #endregion
+      setTimeout(() => {
+        // #region agent log
+        fetch('http://127.0.0.1:7327/ingest/93b71a90-5ff3-415f-bd50-6d765b588235',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'e095e6'},body:JSON.stringify({sessionId:'e095e6',runId:'run1',hypothesisId:'H4',location:'page.tsx:inside-voice-setTimeout',message:'setTimeout fired, calling voice.start',data:{incidentId:res.incident_id},timestamp:Date.now()})}).catch(()=>{});
+        // #endregion
+        voice.start(res.incident_id);
+      }, 600);
     } catch (err) {
       // #region agent log
       fetch('http://127.0.0.1:7327/ingest/93b71a90-5ff3-415f-bd50-6d765b588235',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'ba3cdb'},body:JSON.stringify({sessionId:'ba3cdb',runId:'run1',hypothesisId:'H-C',location:'page.tsx:handleSOS-error',message:'sos-failed',data:{error:String(err)},timestamp:Date.now()})}).catch(()=>{});
@@ -209,7 +217,14 @@ export default function HomePage() {
   /* ── Render ────────────────────────────────────────────────────────── */
 
   return (
-    <main className="relative h-dvh w-screen bg-void overflow-hidden">
+    <main className="relative h-dvh w-screen bg-bg overflow-hidden">
+      {/* ── Organic gradient blobs ─────────────────────────────────────── */}
+      <div className="fixed inset-0 z-0 pointer-events-none overflow-hidden">
+        <div className="absolute w-[600px] h-[600px] -top-[200px] -left-[200px] bg-[radial-gradient(circle,rgba(232,99,74,0.12)_0%,transparent_70%)] rounded-full blur-[40px] animate-drift-slow" />
+        <div className="absolute w-[500px] h-[500px] -bottom-[150px] -right-[100px] bg-[radial-gradient(circle,rgba(107,46,79,0.10)_0%,transparent_70%)] rounded-full blur-[50px] animate-drift-mid" />
+        <div className="absolute w-[400px] h-[400px] top-[40%] left-[35%] bg-[radial-gradient(circle,rgba(232,223,245,0.5)_0%,transparent_70%)] rounded-full blur-[60px] animate-drift-slower" />
+      </div>
+
       {/* ═══════════════════════════════════════ IDLE ═══════════════════ */}
       <div
         className={`absolute inset-0 transition-opacity duration-[400ms] ${
@@ -222,7 +237,7 @@ export default function HomePage() {
 
         {/* Top bar */}
         <div className="absolute top-0 inset-x-0 flex items-center justify-between px-5 pt-[env(safe-area-inset-top,16px)] pb-3 z-20">
-          <span className="font-mono text-[11px] tracking-[3px] text-white/25 uppercase select-none">
+          <span className="font-display text-[14px] tracking-[-0.01em] text-plum font-semibold select-none">
             ShieldHer
           </span>
           <ShieldCounter count={shieldCount} />
@@ -246,8 +261,8 @@ export default function HomePage() {
 
         {geoError && (
           <div className="absolute bottom-[env(safe-area-inset-bottom,24px)] right-6 z-20">
-            <span className="font-mono text-[9px] text-danger/50 tracking-wider">
-              GPS UNAVAILABLE
+            <span className="font-body text-[10px] text-coral/60 tracking-[0.08em] font-medium uppercase">
+              GPS Unavailable
             </span>
           </div>
         )}
@@ -259,24 +274,24 @@ export default function HomePage() {
           isActive ? "opacity-100 z-10" : "opacity-0 z-0 pointer-events-none"
         }`}
       >
-        {/* Alert gradient */}
-        <div className="absolute inset-0 bg-gradient-to-br from-danger/[0.06] via-void to-void" />
-        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top_left,rgba(255,23,68,0.08),transparent_60%)]" />
+        {/* Alert gradient — warm coral tint */}
+        <div className="absolute inset-0 bg-gradient-to-br from-coral/[0.04] via-bg to-bg" />
+        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top_left,rgba(232,99,74,0.06),transparent_60%)]" />
 
         <div className="relative z-10 h-full flex flex-col">
           {/* Voice agent */}
           <div className="flex-none pt-[env(safe-area-inset-top,32px)] pb-2 px-6 flex flex-col items-center gap-3">
             <VoiceWaveform isSpeaking={voice.isSpeaking} />
             <p
-              className={`font-mono text-[10px] tracking-[2.5px] uppercase ${
+              className={`font-body text-[11px] tracking-[0.1em] font-semibold uppercase ${
                 voice.connected
-                  ? "text-shield/70"
-                  : "text-white/20 animate-blink"
+                  ? "text-sage"
+                  : "text-warm-muted/30 animate-blink"
               }`}
             >
               {voice.connected
-                ? "SHIELD AGENT CONNECTED"
-                : "CONNECTING AGENT..."}
+                ? "Shield Agent Connected"
+                : "Connecting Agent..."}
             </p>
             <TranscriptionFeed lines={voice.transcript} />
           </div>
@@ -307,13 +322,13 @@ export default function HomePage() {
 
       {/* ═══════════════════════════════════════ RESOLVED ═══════════════ */}
       <div
-        className={`absolute inset-0 flex flex-col items-center justify-center gap-4 bg-void transition-opacity duration-300 ${
+        className={`absolute inset-0 flex flex-col items-center justify-center gap-4 bg-bg transition-opacity duration-300 ${
           isResolved ? "opacity-100 z-20" : "opacity-0 z-0 pointer-events-none"
         }`}
       >
-        <div className="w-20 h-20 rounded-full bg-shield/10 border border-shield/30 flex items-center justify-center animate-fade-in">
+        <div className="w-20 h-20 rounded-full bg-sage-light border border-sage flex items-center justify-center animate-fade-in">
           <svg
-            className="w-9 h-9 text-shield"
+            className="w-9 h-9 text-plum"
             viewBox="0 0 24 24"
             fill="none"
             stroke="currentColor"
@@ -324,11 +339,11 @@ export default function HomePage() {
             <polyline points="20 6 9 17 4 12" />
           </svg>
         </div>
-        <p className="font-display text-2xl text-shield/80 tracking-[5px] animate-slide-up">
-          YOU&apos;RE SAFE
-        </p>
-        <p className="font-mono text-[10px] text-white/25 tracking-wider animate-slide-up">
-          NOTIFYING YOUR CONTACTS
+        <h2 className="font-display text-2xl text-plum tracking-[-0.02em] animate-slide-up">
+          You&apos;re <span className="italic font-light text-coral">Safe</span>
+        </h2>
+        <p className="font-body text-[11px] text-warm-muted/50 tracking-[0.08em] animate-slide-up uppercase">
+          Notifying your contacts
         </p>
       </div>
 

@@ -8,7 +8,7 @@ export function RadarPulse({ accelerate = false }: { accelerate?: boolean }) {
       {[0, 1, 2].map((i) => (
         <span
           key={i}
-          className="absolute rounded-full border border-danger/[0.06]"
+          className="absolute rounded-full border border-coral/[0.08]"
           style={{
             width: 520,
             height: 520,

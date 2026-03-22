@@ -69,7 +69,7 @@ services:
       redis:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/health')\" || exit 1"]
       interval: 15s
       timeout: 5s
       retries: 3
@@ -81,3 +81,25 @@ services:
         --host 0.0.0.0
         --port 8000
         --reload
+
+  # ── Next.js frontend ────────────────────────────────────────────────────────
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: shieldher-frontend
+    restart: unless-stopped
+    environment:
+      BACKEND_URL: http://app:8000
+      NEXT_PUBLIC_WS_URL: ws://app:8000
+    ports:
+      - "3000:3000"
+    networks:
+      - shieldher-net
+    depends_on:
+      app:
+        condition: service_healthy
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+      - /app/.next

@@ -50,7 +50,7 @@ export function VoiceWaveform({ isSpeaking }: Props) {
       {heights.map((h, i) => (
         <div
           key={i}
-          className="w-[6px] rounded-full bg-gradient-to-t from-danger to-danger/60"
+          className="w-[6px] rounded-full bg-gradient-to-t from-coral to-coral/50"
           style={{ height: h, transition: "none" }}
         />
       ))}

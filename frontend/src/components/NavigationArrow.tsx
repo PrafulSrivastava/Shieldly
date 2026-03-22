@@ -39,7 +39,7 @@ export function NavigationArrow({ position, target, heading, label }: Props) {
             cy="50"
             r="47"
             fill="none"
-            stroke="rgba(255,255,255,0.06)"
+            stroke="rgba(107,46,79,0.12)"
             strokeWidth="0.8"
           />
           {/* Minor ticks */}
@@ -52,33 +52,33 @@ export function NavigationArrow({ position, target, heading, label }: Props) {
               y2="11"
               stroke={
                 deg % 90 === 0
-                  ? "rgba(255,255,255,0.18)"
-                  : "rgba(255,255,255,0.05)"
+                  ? "rgba(107,46,79,0.3)"
+                  : "rgba(107,46,79,0.08)"
               }
               strokeWidth={deg % 90 === 0 ? "1" : "0.5"}
               transform={`rotate(${deg} 50 50)`}
             />
           ))}
-          {/* Arrow body */}
-          <polygon points="50,6 43,52 50,44 57,52" fill="#FF1744" />
-          {/* Arrow tail */}
+          {/* Arrow body — coral */}
+          <polygon points="50,6 43,52 50,44 57,52" fill="#E8634A" />
+          {/* Arrow tail — plum faint */}
           <polygon
             points="50,94 43,52 50,58 57,52"
-            fill="rgba(255,255,255,0.06)"
+            fill="rgba(107,46,79,0.1)"
           />
           {/* Center dot */}
-          <circle cx="50" cy="50" r="2.5" fill="rgba(255,255,255,0.2)" />
+          <circle cx="50" cy="50" r="2.5" fill="rgba(107,46,79,0.25)" />
         </svg>
       </div>
 
       {/* Navigation text */}
-      <div className="text-center space-y-1.5 max-w-xs px-4">
+      <div className="text-left space-y-1.5 max-w-xs px-4">
         {label && (
-          <p className="font-mono text-[11px] text-amber tracking-[1.5px] uppercase leading-snug">
-            WALK TOWARD {label}
+          <p className="font-body text-[12px] text-coral tracking-[0.08em] font-semibold uppercase leading-snug">
+            Walk toward {label}
           </p>
         )}
-        <p className="font-mono text-lg text-white/50 tracking-wider font-medium">
+        <p className="font-display text-lg text-plum/50 tracking-wider font-medium">
           {distStr}
         </p>
       </div>

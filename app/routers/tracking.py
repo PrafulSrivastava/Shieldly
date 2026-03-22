@@ -143,7 +143,6 @@ async def get_tracking_page(
 async def tracking_live_ws(
     tracking_token: str,
     websocket: WebSocket,
-    db: AsyncSession = Depends(get_db),
     redis: aioredis.Redis = Depends(get_redis),
 ) -> None:
     """Public WebSocket for live tracking updates — no auth required.
@@ -151,9 +150,17 @@ async def tracking_live_ws(
     Subscribes to the incident's Redis pub/sub channel and forwards
     shield_location, person_location, convergence_update, and
     incident_resolved messages to the tracking page client.
+
+    DB session is scoped to the initial lookup only so we don't hold a
+    connection-pool slot for the entire WebSocket lifetime.
     """
-    incident = await incident_service.get_by_tracking_token(db, tracking_token)
+    from app.database import AsyncSessionLocal
+
+    async with AsyncSessionLocal() as db:
+        incident = await incident_service.get_by_tracking_token(db, tracking_token)
+
     if not incident:
+        await websocket.accept()
         await websocket.close(code=4004)
         return
 

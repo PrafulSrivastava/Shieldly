@@ -31,9 +31,9 @@ export function AllClearButton({ onConfirm }: Props) {
 
   if (confirmed) {
     return (
-      <div className="w-[72px] h-[72px] rounded-full bg-shield/10 border border-shield/40 flex items-center justify-center animate-fade-in">
-        <span className="font-display text-sm text-shield tracking-[3px]">
-          SAFE
+      <div className="w-[72px] h-[72px] rounded-full bg-sage-light border border-sage flex items-center justify-center animate-fade-in">
+        <span className="font-display text-sm text-plum tracking-[0.04em] font-semibold">
+          Safe
         </span>
       </div>
     );
@@ -45,9 +45,9 @@ export function AllClearButton({ onConfirm }: Props) {
       onPointerUp={handleUp}
       onPointerLeave={handleUp}
       onContextMenu={(e) => e.preventDefault()}
-      className="relative w-[72px] h-[72px] rounded-full border border-white/15 flex items-center justify-center group select-none touch-none"
+      className="relative w-[72px] h-[72px] rounded-full border border-plum/15 flex items-center justify-center group select-none touch-none bg-white/60 backdrop-blur-sm"
     >
-      {/* Progress ring */}
+      {/* Progress ring — sage green */}
       <svg
         className="absolute inset-0 w-full h-full -rotate-90 pointer-events-none"
         viewBox="0 0 80 80"
@@ -57,7 +57,7 @@ export function AllClearButton({ onConfirm }: Props) {
           cy="40"
           r="38"
           fill="none"
-          stroke="rgba(0,230,118,0.25)"
+          stroke="rgba(184,207,192,0.4)"
           strokeWidth="2"
           strokeDasharray={CIRCUMFERENCE}
           strokeDashoffset={holding ? 0 : CIRCUMFERENCE}
@@ -70,10 +70,10 @@ export function AllClearButton({ onConfirm }: Props) {
         />
       </svg>
 
-      <span className="font-display text-[10px] text-white/50 tracking-[2px] group-active:text-shield/80 transition-colors leading-none text-center">
-        ALL
+      <span className="font-body text-[10px] text-plum/50 tracking-[0.1em] font-semibold group-active:text-sage transition-colors leading-none text-center uppercase">
+        All
         <br />
-        CLEAR
+        Clear
       </span>
     </button>
   );

@@ -56,11 +56,11 @@ export function MiniMap({
 
       ctx.beginPath();
       ctx.arc(r, r, r, 0, Math.PI * 2);
-      ctx.fillStyle = "#0C0C14";
+      ctx.fillStyle = "#FFFFFF";
       ctx.fill();
       ctx.clip();
 
-      ctx.strokeStyle = "rgba(255,255,255,0.03)";
+      ctx.strokeStyle = "rgba(232,223,245,0.5)";
       ctx.lineWidth = 0.5;
       for (const frac of [0.33, 0.66, 1]) {
         ctx.beginPath();
@@ -68,7 +68,7 @@ export function MiniMap({
         ctx.stroke();
       }
 
-      ctx.strokeStyle = "rgba(255,255,255,0.02)";
+      ctx.strokeStyle = "rgba(232,223,245,0.3)";
       ctx.beginPath();
       ctx.moveTo(r, 0);
       ctx.lineTo(r, size);
@@ -80,7 +80,7 @@ export function MiniMap({
         if (convergence) {
           const cp = toRadar(position, convergence, r);
           if (cp) {
-            ctx.strokeStyle = "#FF9800";
+            ctx.strokeStyle = "#E8634A";
             ctx.lineWidth = 1.2;
             const a = 5;
             ctx.beginPath();
@@ -97,7 +97,7 @@ export function MiniMap({
           if (sp) {
             ctx.beginPath();
             ctx.arc(sp.x, sp.y, 2.5, 0, Math.PI * 2);
-            ctx.fillStyle = "#00E676";
+            ctx.fillStyle = "#B8CFC0";
             ctx.fill();
           }
         });
@@ -105,11 +105,11 @@ export function MiniMap({
         const pulse = 0.55 + 0.45 * Math.sin(Date.now() / 500);
         ctx.beginPath();
         ctx.arc(r, r, 3.5, 0, Math.PI * 2);
-        ctx.fillStyle = `rgba(255,255,255,${pulse})`;
+        ctx.fillStyle = `rgba(107,46,79,${pulse})`;
         ctx.fill();
         ctx.beginPath();
         ctx.arc(r, r, 6, 0, Math.PI * 2);
-        ctx.strokeStyle = `rgba(255,255,255,${pulse * 0.25})`;
+        ctx.strokeStyle = `rgba(107,46,79,${pulse * 0.25})`;
         ctx.lineWidth = 0.8;
         ctx.stroke();
       }
@@ -125,7 +125,7 @@ export function MiniMap({
   return (
     <button
       onClick={onExpand}
-      className="relative rounded-2xl overflow-hidden border border-void-border/60 group cursor-pointer"
+      className="relative rounded-card overflow-hidden border border-lavender-muted shadow-soft group cursor-pointer"
       style={{ width: size, height: size }}
     >
       <canvas
@@ -133,8 +133,8 @@ export function MiniMap({
         className="w-full h-full"
         style={{ width: size, height: size }}
       />
-      <div className="absolute inset-0 scanline-overlay pointer-events-none opacity-30" />
-      <div className="absolute inset-0 bg-danger/0 group-hover:bg-danger/[0.04] transition-colors pointer-events-none" />
+      <div className="absolute inset-0 scanline-overlay pointer-events-none opacity-20" />
+      <div className="absolute inset-0 bg-coral/0 group-hover:bg-coral/[0.04] transition-colors pointer-events-none" />
     </button>
   );
 }

@@ -1,18 +1,16 @@
 import type { Metadata, Viewport } from "next";
-import { Bebas_Neue, IBM_Plex_Mono } from "next/font/google";
+import { Fraunces, Outfit } from "next/font/google";
 import "./globals.css";
 
-const bebasNeue = Bebas_Neue({
-  weight: "400",
+const fraunces = Fraunces({
   subsets: ["latin"],
   variable: "--font-display",
   display: "swap",
 });
 
-const ibmPlexMono = IBM_Plex_Mono({
-  weight: ["400", "500", "600"],
+const outfit = Outfit({
   subsets: ["latin"],
-  variable: "--font-mono",
+  variable: "--font-body",
   display: "swap",
 });
 
@@ -22,7 +20,7 @@ export const metadata: Metadata = {
   manifest: "/manifest.json",
   appleWebApp: {
     capable: true,
-    statusBarStyle: "black-translucent",
+    statusBarStyle: "default",
     title: "ShieldHer",
   },
 };
@@ -32,7 +30,7 @@ export const viewport: Viewport = {
   initialScale: 1,
   maximumScale: 1,
   userScalable: false,
-  themeColor: "#0A0A0F",
+  themeColor: "#FFF8F3",
 };
 
 export default function RootLayout({
@@ -43,9 +41,11 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      className={`${bebasNeue.variable} ${ibmPlexMono.variable}`}
+      className={`${fraunces.variable} ${outfit.variable}`}
     >
-      <body className="bg-void text-white antialiased">{children}</body>
+      <body className="bg-bg text-warm-black antialiased font-body">
+        {children}
+      </body>
     </html>
   );
 }

@@ -26,10 +26,10 @@ export function SOSButton({ onTrigger, disabled }: Props) {
       disabled={disabled}
       className="relative select-none focus:outline-none disabled:opacity-40 disabled:pointer-events-none"
     >
-      {/* Outer glow ring */}
+      {/* Outer warm glow */}
       <div
         className={`
-          absolute -inset-3 rounded-full bg-danger/10 blur-xl
+          absolute -inset-4 rounded-full bg-coral/10 blur-2xl
           transition-opacity duration-300
           ${pressed ? "opacity-80" : "opacity-40"}
         `}
@@ -39,20 +39,21 @@ export function SOSButton({ onTrigger, disabled }: Props) {
       <div
         className={`
           relative w-48 h-48 rounded-full
-          bg-gradient-to-b from-danger to-danger-dark
+          bg-gradient-to-b from-coral to-coral-dark
           flex items-center justify-center
           animate-glow-pulse
+          shadow-coral-glow
           transition-transform duration-200 ease-out
           ${pressed ? "scale-[0.88]" : "scale-100 hover:scale-[1.03]"}
         `}
       >
         {/* Inner highlight */}
-        <div className="absolute inset-[3px] rounded-full bg-gradient-to-b from-white/[0.08] to-transparent pointer-events-none" />
+        <div className="absolute inset-[3px] rounded-full bg-gradient-to-b from-white/[0.12] to-transparent pointer-events-none" />
 
-        <span className="font-display text-[22px] tracking-[4px] text-white leading-none text-center px-6">
-          I FEEL
+        <span className="font-display text-[22px] tracking-[-0.01em] text-bg leading-none text-center px-6 font-semibold">
+          I Feel
           <br />
-          UNSAFE
+          <span className="italic font-light">Unsafe</span>
         </span>
       </div>
     </button>

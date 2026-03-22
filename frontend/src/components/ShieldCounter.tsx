@@ -5,20 +5,22 @@ interface Props {
 }
 
 export function ShieldCounter({ count }: Props) {
-  const dot =
-    count >= 5 ? "bg-shield" : count >= 2 ? "bg-amber" : "bg-danger";
-  const text =
+  const bgColor =
+    count >= 5 ? "bg-sage-light" : count >= 2 ? "bg-blush" : "bg-lavender";
+  const dotColor =
+    count >= 5 ? "bg-sage" : count >= 2 ? "bg-coral" : "bg-plum";
+  const textColor =
     count >= 5
-      ? "text-shield"
+      ? "text-plum"
       : count >= 2
-        ? "text-amber"
-        : "text-danger";
+        ? "text-coral"
+        : "text-plum";
 
   return (
-    <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-void-light/80 backdrop-blur-sm border border-void-border">
-      <span className={`w-1.5 h-1.5 rounded-full ${dot} animate-dot-pulse`} />
-      <span className={`font-mono text-[10px] tracking-[1.5px] ${text}`}>
-        {count} SHIELD{count !== 1 ? "S" : ""} NEARBY
+    <div className={`flex items-center gap-2 px-3 py-1.5 rounded-pill ${bgColor} border border-lavender-muted`}>
+      <span className={`w-1.5 h-1.5 rounded-full ${dotColor} animate-dot-pulse`} />
+      <span className={`font-body text-[10px] tracking-[0.12em] font-semibold uppercase ${textColor}`}>
+        {count} Shield{count !== 1 ? "s" : ""} Nearby
       </span>
     </div>
   );

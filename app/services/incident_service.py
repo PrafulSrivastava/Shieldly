@@ -129,26 +129,23 @@ async def trigger_sos(
     tracking_url = generate_tracking_url(incident.tracking_token)
 
     # Step 5 — push notifications (fire-and-forget; errors must not fail the request)
-    await asyncio.gather(
-        *[
-            send_to_shield(
-                UUID(s["shield_id"]),
-                title="SOS Alert — Help Needed",
-                body=f"Someone needs help {s['distance_km']:.1f} km away",
-                data={
-                    "type": "sos_alert",
-                    "incident_id": str(incident.id),
-                    "lat": incident.trigger_lat,
-                    "lng": incident.trigger_lng,
-                    "distance_km": round(s["distance_km"], 2),
-                    "tracking_url": tracking_url,
-                },
-                db=db,
-            )
-            for s in nearby
-        ],
-        return_exceptions=True,
-    )
+    # Sequential sends share a single DB session safely; concurrent gather would
+    # race on db.commit() inside clear_expired_token and cause IllegalStateChangeError.
+    for s in nearby:
+        await send_to_shield(
+            UUID(s["shield_id"]),
+            title="SOS Alert — Help Needed",
+            body=f"Someone needs help {s['distance_km']:.1f} km away",
+            data={
+                "type": "sos_alert",
+                "incident_id": str(incident.id),
+                "lat": incident.trigger_lat,
+                "lng": incident.trigger_lng,
+                "distance_km": round(s["distance_km"], 2),
+                "tracking_url": tracking_url,
+            },
+            db=db,
+        )
 
     # Step 6 — SMS (background task; runs after response is sent)
     if user.emergency_contact_phone:
@@ -333,19 +330,14 @@ async def resolve_incident(
         )
     ).scalars().all()
 
-    await asyncio.gather(
-        *[
-            send_to_shield(
-                resp.shield_id,
-                title="She is safe",
-                body="She is safe — thank you",
-                data={"type": "resolved", "incident_id": str(incident_id)},
-                db=db,
-            )
-            for resp in responding
-        ],
-        return_exceptions=True,
-    )
+    for resp in responding:
+        await send_to_shield(
+            resp.shield_id,
+            title="She is safe",
+            body="She is safe — thank you",
+            data={"type": "resolved", "incident_id": str(incident_id)},
+            db=db,
+        )
 
     # Background SMS
     if user.emergency_contact_phone:
@@ -816,19 +808,14 @@ async def _send_covered_notifications(
         )
     ).scalars().all()
 
-    await asyncio.gather(
-        *[
-            send_to_shield(
-                resp.shield_id,
-                title="Covered",
-                body="Enough Shields are responding — you're off the hook. Thank you!",
-                data={"type": "covered", "incident_id": str(incident_id)},
-                db=db,
-            )
-            for resp in notified
-        ],
-        return_exceptions=True,
-    )
+    for resp in notified:
+        await send_to_shield(
+            resp.shield_id,
+            title="Covered",
+            body="Enough Shields are responding — you're off the hook. Thank you!",
+            data={"type": "covered", "incident_id": str(incident_id)},
+            db=db,
+        )
 
 
 async def _increment_hotspot(

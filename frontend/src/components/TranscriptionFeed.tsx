@@ -22,21 +22,21 @@ export function TranscriptionFeed({ lines }: Props) {
   return (
     <div className="relative w-full max-w-sm">
       <div className="max-h-28 overflow-y-auto scrollbar-thin px-1">
-        <div className="font-mono text-[11px] leading-[1.7] space-y-0.5">
+        <div className="font-body text-[12px] leading-[1.7] space-y-0.5">
           {lines.length === 0 && (
-            <span className="text-white/15 animate-blink">
-              ▊ AWAITING AGENT...
+            <span className="text-warm-muted/40 animate-blink">
+              Awaiting agent...
             </span>
           )}
           {lines.map((line, i) => (
             <div
               key={i}
               className={`animate-slide-up ${
-                line.role === "agent" ? "text-danger/70" : "text-white/30"
+                line.role === "agent" ? "text-coral" : "text-warm-muted"
               }`}
             >
-              <span className="text-white/15 mr-1.5 select-none">
-                {line.role === "agent" ? "▸" : "$"}
+              <span className="text-plum/25 mr-1.5 select-none">
+                {line.role === "agent" ? "\u25B8" : "\u25B9"}
               </span>
               {line.text}
             </div>
@@ -46,7 +46,7 @@ export function TranscriptionFeed({ lines }: Props) {
       </div>
 
       {/* Top fade */}
-      <div className="absolute top-0 left-0 right-0 h-3 bg-gradient-to-b from-void/90 to-transparent pointer-events-none" />
+      <div className="absolute top-0 left-0 right-0 h-3 bg-gradient-to-b from-bg/90 to-transparent pointer-events-none" />
     </div>
   );
 }
