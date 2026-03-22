@@ -10,6 +10,7 @@ from app.database import get_db
 from app.schemas.admin import (
     AdminIncidentListResponse,
     AdminStatsResponse,
+    MapDataResponse,
     PendingShieldsResponse,
     VerifyShieldRequest,
     VerifyShieldResponse,
@@ -106,3 +107,20 @@ async def get_stats(
     resolved incidents.
     """
     return await admin_service.get_stats(db=db)
+
+
+@router.get(
+    "/map-data",
+    response_model=MapDataResponse,
+    dependencies=[Depends(_require_admin)],
+)
+async def get_map_data(
+    db: AsyncSession = Depends(get_db),
+) -> MapDataResponse:
+    """
+    All active shield positions and hotspot zone data for map visualisation.
+
+    Returns every shield that has a known location (any status) and every
+    hotspot cell with ≥ 2 recorded incidents decoded from geohash to lat/lng.
+    """
+    return await admin_service.get_map_data(db=db)

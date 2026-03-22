@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Literal
 from uuid import UUID
 
 from pydantic import BaseModel
@@ -54,3 +55,25 @@ class AdminStatsResponse(BaseModel):
     total_incidents: int
     resolved_incidents: int
     avg_response_time_seconds: float | None
+
+
+class MapShieldItem(BaseModel):
+    id: UUID
+    name: str
+    lat: float
+    lng: float
+    status: str
+    last_seen: datetime | None = None
+
+
+class MapHotspotItem(BaseModel):
+    geohash: str
+    lat: float
+    lng: float
+    incident_count: int
+    risk_level: Literal["low", "medium", "high"]
+
+
+class MapDataResponse(BaseModel):
+    shields: list[MapShieldItem]
+    hotspots: list[MapHotspotItem]

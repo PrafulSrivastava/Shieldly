@@ -5,6 +5,7 @@ from fastapi import HTTPException
 from sqlalchemy import extract, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.hotspot_data import HotspotData
 from app.models.incidents import Incident, IncidentStatus
 from app.models.shields import Shield, ShieldStatus
 from app.models.users import User
@@ -12,10 +13,14 @@ from app.schemas.admin import (
     AdminIncidentItem,
     AdminIncidentListResponse,
     AdminStatsResponse,
+    MapDataResponse,
+    MapHotspotItem,
+    MapShieldItem,
     PendingShieldItem,
     PendingShieldsResponse,
     VerifyShieldResponse,
 )
+from app.utils.geo import decode_geohash
 
 logger = logging.getLogger(__name__)
 
@@ -198,3 +203,62 @@ async def get_stats(*, db: AsyncSession) -> AdminStatsResponse:
         resolved_incidents=resolved_incidents,
         avg_response_time_seconds=round(avg_rt, 2) if avg_rt is not None else None,
     )
+
+
+async def get_map_data(*, db: AsyncSession) -> MapDataResponse:
+    """Return all shield positions with locations and all hotspot cells for map rendering."""
+    shield_rows = (
+        await db.execute(
+            select(Shield, User.name)
+            .join(User, Shield.user_id == User.id)
+            .where(
+                Shield.current_lat.isnot(None),
+                Shield.current_lng.isnot(None),
+            )
+        )
+    ).all()
+
+    shields: list[MapShieldItem] = []
+    for shield, name in shield_rows:
+        shields.append(
+            MapShieldItem(
+                id=shield.id,
+                name=name or "Shield volunteer",
+                lat=shield.current_lat,
+                lng=shield.current_lng,
+                status=shield.status.value,
+                last_seen=shield.location_updated_at,
+            )
+        )
+
+    hotspot_rows = (await db.execute(select(HotspotData))).scalars().all()
+
+    hotspots: list[MapHotspotItem] = []
+    for h in hotspot_rows:
+        if h.incident_count < 2:
+            continue
+        try:
+            min_lat, max_lat, min_lng, max_lng = decode_geohash(h.geohash)
+            center_lat = (min_lat + max_lat) / 2
+            center_lng = (min_lng + max_lng) / 2
+        except Exception:
+            continue
+
+        if h.incident_count >= 10:
+            risk: str = "high"
+        elif h.incident_count >= 5:
+            risk = "medium"
+        else:
+            risk = "low"
+
+        hotspots.append(
+            MapHotspotItem(
+                geohash=h.geohash,
+                lat=center_lat,
+                lng=center_lng,
+                incident_count=h.incident_count,
+                risk_level=risk,  # type: ignore[arg-type]
+            )
+        )
+
+    return MapDataResponse(shields=shields, hotspots=hotspots)

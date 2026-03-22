@@ -1,0 +1,77 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html, body, #root {
+    height: 100%;
+    background-color: #E8E3DC;
+  }
+
+  * {
+    -webkit-tap-highlight-color: transparent;
+  }
+}
+
+@layer utilities {
+  .animation-delay-100 { animation-delay: 100ms; }
+  .animation-delay-200 { animation-delay: 200ms; }
+  .animation-delay-300 { animation-delay: 300ms; }
+}
+
+/* Leaflet popup & control overrides — warm palette */
+.leaflet-popup-content-wrapper {
+  background: #F4F0EC;
+  border-radius: 16px;
+  box-shadow: 0 4px 24px rgba(43, 24, 24, 0.12);
+  border: none;
+  font-family: 'DM Sans', sans-serif;
+}
+
+.leaflet-popup-tip {
+  background: #F4F0EC;
+}
+
+.leaflet-popup-content {
+  margin: 14px 18px;
+  color: #2B2018;
+  font-size: 14px;
+}
+
+.leaflet-control-zoom a {
+  background: #F4F0EC !important;
+  color: #2B2018 !important;
+  border-color: #E8E3DC !important;
+  font-family: 'DM Sans', sans-serif;
+}
+
+.leaflet-control-zoom a:hover {
+  background: #E8E3DC !important;
+}
+
+/* Cluster icon styles */
+.custom-cluster {
+  background: #F4F0EC;
+  border: 2px solid #C4543A;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: 'DM Sans', sans-serif;
+  font-size: 13px;
+  font-weight: 600;
+  color: #2B2018;
+  box-shadow: 0 2px 10px rgba(43, 24, 24, 0.15);
+}
+
+/* Skeleton shimmer */
+.skeleton {
+  background: linear-gradient(
+    90deg,
+    #E8E3DC 25%,
+    #F4F0EC 50%,
+    #E8E3DC 75%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.6s linear infinite;
+}

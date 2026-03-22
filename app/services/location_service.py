@@ -36,7 +36,7 @@ from app.utils.geo import haversine_distance
 logger = logging.getLogger(__name__)
 
 _LOCATION_TTL = 300  # seconds — matches the "5 min stale" rule
-_STALE_THRESHOLD = timedelta(minutes=5)
+_STALE_THRESHOLD = timedelta(days=7)
 _MIN_SHIELDS_NEAR = 3
 _MAX_SEARCH_RADIUS_KM = 3.0
 

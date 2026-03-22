@@ -412,6 +412,57 @@ async def mock_shield_respond(
 
 
 @router.post(
+    "/dev/mock-incident-respond/{incident_id}",
+    summary="Simulate all notified shields accepting an incident",
+    description=(
+        "Finds every Shield still in 'notified' status for the incident and "
+        "marks each one as 'responding', moving their position 30 % toward the "
+        "person's location. **Development only.**"
+    ),
+)
+async def mock_incident_respond(
+    incident_id: UUID,
+    db: AsyncSession = Depends(get_db),
+    redis: aioredis.Redis = Depends(get_redis),
+) -> dict:
+    # Find all notified responses for this incident
+    from app.models.incident_responses import ResponseStatus
+
+    rows = (
+        await db.execute(
+            select(IncidentResponse, Shield)
+            .join(Shield, IncidentResponse.shield_id == Shield.id)
+            .where(
+                IncidentResponse.incident_id == incident_id,
+                IncidentResponse.status == ResponseStatus.notified,
+            )
+        )
+    ).all()
+
+    if not rows:
+        raise HTTPException(
+            status_code=404,
+            detail="No notified shields found for this incident",
+        )
+
+    responded = 0
+    for _inc_resp, shield in rows:
+        try:
+            await incident_service.update_response_status(
+                shield,
+                incident_id,
+                "responding",
+                db=db,
+                redis=redis,
+            )
+            responded += 1
+        except Exception as exc:
+            logger.warning("mock-incident-respond: shield %s skipped — %s", shield.id, exc)
+
+    return {"incident_id": str(incident_id), "shields_responded": responded}
+
+
+@router.post(
     "/dev/test/sms",
     response_model=TestSMSResponse,
     summary="Send a test SOS SMS",
@@ -516,3 +567,326 @@ async def seed_hotspots(
 
     logger.info("Seeded %d hotspot cell(s) for Stuttgart route", len(cells))
     return SeedHotspotsResponse(seeded=True, cells=cells)
+
+
+# ── Large-scale seed (1 000 users / 400 shields) ──────────────────────────────
+
+_LARGE_SEED_PERSON_PREFIX = "+4915100"
+_LARGE_SEED_SHIELD_PREFIX = "+4915200"
+
+_FIRST_NAMES = [
+    "Lena", "Sophie", "Anna", "Laura", "Julia", "Maria", "Sarah", "Lisa",
+    "Emma", "Lea", "Hannah", "Mia", "Katharina", "Franziska", "Clara",
+    "Nina", "Jana", "Sabine", "Petra", "Monika", "Claudia", "Stefanie",
+    "Sandra", "Andrea", "Melanie", "Nadine", "Anja", "Tanja", "Karin",
+    "Birgit", "Heike", "Ursula", "Gabi", "Ingrid", "Renate", "Martina",
+    "Simone", "Sonja", "Silke", "Corinna", "Carla", "Miriam", "Johanna",
+    "Luisa", "Alina", "Vanessa", "Jessica", "Carina", "Isabell", "Verena",
+]
+
+_LAST_NAMES = [
+    "Müller", "Schmidt", "Schneider", "Fischer", "Weber", "Meyer", "Wagner",
+    "Becker", "Schulz", "Hoffmann", "Schäfer", "Koch", "Bauer", "Richter",
+    "Klein", "Wolf", "Schröder", "Neumann", "Schwarz", "Zimmermann",
+    "Braun", "Krüger", "Hofmann", "Hartmann", "Lange", "Schmitt", "Werner",
+    "Schmitz", "Krause", "Meier", "Lehmann", "Schmid", "Schulze", "Maier",
+    "Köhler", "Herrmann", "König", "Walter", "Mayer", "Huber", "Kaiser",
+    "Fuchs", "Peters", "Lang", "Scholz", "Möller", "Weiß", "Jung",
+    "Hahn", "Schubert",
+]
+
+# Real neighbourhood anchor points for Heilbronn and Stuttgart
+_HEILBRONN_AREAS: list[tuple[float, float, str]] = [
+    (49.1427, 9.2109, "Heilbronn Centre"),
+    (49.1380, 9.1780, "Böckingen"),
+    (49.1650, 9.2150, "Neckargartach"),
+    (49.1200, 9.2250, "Sontheim"),
+    (49.1850, 9.1950, "Kirchhausen"),
+    (49.1600, 9.1700, "Frankenbach"),
+    (49.1200, 9.1750, "Horkheim"),
+    (49.1050, 9.1900, "Flein"),
+    (49.1750, 9.2400, "Klingenberg"),
+    (49.1050, 9.2050, "Biberach"),
+]
+
+_STUTTGART_AREAS: list[tuple[float, float, str]] = [
+    (48.7758, 9.1829, "Stuttgart Mitte"),
+    (48.7950, 9.1800, "Stuttgart Nord"),
+    (48.7600, 9.1700, "Stuttgart Süd"),
+    (48.7700, 9.2100, "Stuttgart Ost"),
+    (48.7700, 9.1500, "Stuttgart West"),
+    (48.8000, 9.2300, "Bad Cannstatt"),
+    (48.8300, 9.1800, "Zuffenhausen"),
+    (48.8100, 9.1600, "Feuerbach"),
+    (48.7350, 9.1200, "Vaihingen"),
+    (48.7400, 9.1900, "Degerloch"),
+    (48.7200, 9.1600, "Möhringen"),
+    (48.7800, 9.2500, "Untertürkheim"),
+    (48.7800, 9.2300, "Wangen"),
+    (48.8400, 9.1700, "Stammheim"),
+    (48.7050, 9.2100, "Plieningen"),
+]
+
+# Weighted pool: 150 Heilbronn slots + 250 Stuttgart slots = 400 total
+_SHIELD_AREA_POOL: list[tuple[float, float, str]] = (
+    _HEILBRONN_AREAS * 15   # 10 areas × 15 = 150
+    + _STUTTGART_AREAS * 17  # 15 areas × 17 = 255 (trimmed to 250 in code)
+)
+
+# Hotspot anchor incidents for both cities (seeded alongside users)
+_LARGE_SEED_HOTSPOTS: list[dict] = [
+    # Heilbronn late-night clusters
+    {"lat": 49.1427, "lng": 9.2109, "days_ago": 5,  "hours": {21: 2, 22: 3, 23: 1}},
+    {"lat": 49.1380, "lng": 9.1780, "days_ago": 12, "hours": {22: 2, 23: 3}},
+    {"lat": 49.1650, "lng": 9.2150, "days_ago": 20, "hours": {21: 1, 23: 2}},
+    {"lat": 49.1200, "lng": 9.2250, "days_ago": 35, "hours": {22: 1, 23: 1}},
+    {"lat": 49.1050, "lng": 9.1900, "days_ago": 60, "hours": {21: 1, 22: 1}},
+    # Stuttgart late-night clusters
+    {"lat": 48.7758, "lng": 9.1829, "days_ago": 3,  "hours": {21: 3, 22: 4, 23: 2}},
+    {"lat": 48.7700, "lng": 9.2100, "days_ago": 9,  "hours": {22: 3, 23: 4}},
+    {"lat": 48.8000, "lng": 9.2300, "days_ago": 18, "hours": {21: 2, 22: 2, 23: 1}},
+    {"lat": 48.7600, "lng": 9.1700, "days_ago": 27, "hours": {21: 1, 22: 2}},
+    {"lat": 48.7350, "lng": 9.1200, "days_ago": 45, "hours": {22: 1, 23: 2}},
+    {"lat": 48.8300, "lng": 9.1800, "days_ago": 55, "hours": {21: 2, 23: 1}},
+    {"lat": 48.7400, "lng": 9.1900, "days_ago": 70, "hours": {22: 2, 23: 1}},
+]
+
+
+class LargeSeedResponse(BaseModel):
+    seeded: bool
+    persons: int
+    shields: int
+    active_shields: int
+    inactive_shields: int
+    pending_shields: int
+    hotspot_cells_seeded: int
+
+
+async def _delete_large_seed_data(db: AsyncSession) -> None:
+    """Remove all rows created by a previous seed-large run."""
+    person_rows = (
+        await db.execute(
+            select(User).where(User.phone.like(_LARGE_SEED_PERSON_PREFIX + "%"))
+        )
+    ).scalars().all()
+    shield_rows = (
+        await db.execute(
+            select(User).where(User.phone.like(_LARGE_SEED_SHIELD_PREFIX + "%"))
+        )
+    ).scalars().all()
+
+    all_users = person_rows + shield_rows
+    if not all_users:
+        return
+
+    user_ids = [u.id for u in all_users]
+
+    incidents = (
+        await db.execute(
+            select(Incident).where(Incident.triggered_by.in_(user_ids))
+        )
+    ).scalars().all()
+    incident_ids = [i.id for i in incidents]
+
+    if incident_ids:
+        await db.execute(
+            delete(IncidentResponse).where(
+                IncidentResponse.incident_id.in_(incident_ids)
+            )
+        )
+        await db.execute(delete(Incident).where(Incident.id.in_(incident_ids)))
+
+    await db.execute(delete(Shield).where(Shield.user_id.in_(user_ids)))
+    await db.execute(delete(User).where(User.id.in_(user_ids)))
+    await db.flush()
+
+
+@router.post(
+    "/dev/seed-large",
+    response_model=LargeSeedResponse,
+    summary="Seed 1 000 users + 400 shields across Heilbronn & Stuttgart",
+    description=(
+        "Idempotent large-scale seed. Deletes previous large-seed rows, then creates: "
+        "600 test Persons, 400 Shield volunteers (280 active / 60 inactive / 60 pending) "
+        "spread across real neighbourhoods in Heilbronn (150 shields) and Stuttgart "
+        "(250 shields), plus hotspot data for both cities. "
+        "Active shield locations are written to Redis. **Development only.**"
+    ),
+)
+async def seed_large(
+    db: AsyncSession = Depends(get_db),
+    redis: aioredis.Redis = Depends(get_redis),
+) -> LargeSeedResponse:
+    from datetime import timedelta
+    from sqlalchemy.orm.attributes import flag_modified
+
+    rng = random.Random(42)  # fixed seed → deterministic, idempotent names/positions
+
+    await _delete_large_seed_data(db)
+
+    now = datetime.now(timezone.utc)
+
+    # ── 600 Persons ───────────────────────────────────────────────────────────
+    n_persons = 600
+    for i in range(1, n_persons + 1):
+        phone = f"{_LARGE_SEED_PERSON_PREFIX}{i:06d}"
+        first = rng.choice(_FIRST_NAMES)
+        last = rng.choice(_LAST_NAMES)
+        has_ec = rng.random() < 0.80  # 80 % have emergency contact
+
+        user = User(
+            id=uuid4(),
+            phone=phone,
+            name=f"{first} {last}",
+            role=UserRole.person,
+            firebase_uid=f"mock-uid-{phone}",
+            emergency_contact_name=f"{rng.choice(_FIRST_NAMES)} {last}" if has_ec else None,
+            emergency_contact_phone=f"+4916{rng.randint(10000000, 99999999)}" if has_ec else None,
+            is_active=True,
+        )
+        db.add(user)
+
+        if i % 50 == 0:
+            await db.flush()
+
+    await db.flush()
+
+    # ── 400 Shields ───────────────────────────────────────────────────────────
+    # Status breakdown: 0–279 → active, 280–339 → inactive, 340–399 → pending
+    n_shields = 400
+    n_active = 280
+    n_inactive = 60
+    # n_pending = 60 (remainder)
+
+    # Build area pool: 150 Heilbronn + 250 Stuttgart
+    heilbronn_pool = _HEILBRONN_AREAS * 15          # 150 slots
+    stuttgart_pool = (_STUTTGART_AREAS * 17)[:250]  # 255 → trim to 250
+    area_pool = heilbronn_pool + stuttgart_pool      # 400 total
+
+    active_shields_written = 0
+
+    for i in range(n_shields):
+        phone = f"{_LARGE_SEED_SHIELD_PREFIX}{(i + 1):06d}"
+        first = rng.choice(_FIRST_NAMES)
+        last = rng.choice(_LAST_NAMES)
+
+        if i < n_active:
+            status = ShieldStatus.active
+            id_verified = True
+        elif i < n_active + n_inactive:
+            status = ShieldStatus.inactive
+            id_verified = True
+        else:
+            status = ShieldStatus.pending
+            id_verified = False
+
+        base_lat, base_lng, _ = area_pool[i]
+        jitter_lat = rng.uniform(-0.003, 0.003)
+        jitter_lng = rng.uniform(-0.003, 0.003)
+        shield_lat = round(base_lat + jitter_lat, 6)
+        shield_lng = round(base_lng + jitter_lng, 6)
+
+        # Active hours: 60 % of active/inactive shields get an evening window
+        active_start = None
+        active_end = None
+        if status in (ShieldStatus.active, ShieldStatus.inactive) and rng.random() < 0.60:
+            start_h = rng.choice([17, 18, 19, 20])
+            end_h = rng.choice([22, 23])
+            from datetime import time as dt_time
+            active_start = dt_time(start_h, 0)
+            active_end = dt_time(end_h, 0)
+
+        user = User(
+            id=uuid4(),
+            phone=phone,
+            name=f"{first} {last}",
+            role=UserRole.shield,
+            firebase_uid=f"mock-uid-{phone}",
+            is_active=True,
+        )
+        db.add(user)
+        await db.flush()
+
+        shield = Shield(
+            id=uuid4(),
+            user_id=user.id,
+            status=status,
+            id_verified=id_verified,
+            commitment_signed=(status != ShieldStatus.pending),
+            current_lat=shield_lat if status != ShieldStatus.pending else None,
+            current_lng=shield_lng if status != ShieldStatus.pending else None,
+            location_updated_at=now if status != ShieldStatus.pending else None,
+            active_hours_start=active_start,
+            active_hours_end=active_end,
+            expo_push_token=(
+                f"ExponentPushToken[LARGE_SEED_{i:04d}_FAKE]"
+                if status == ShieldStatus.active
+                else None
+            ),
+            token_updated_at=now if status == ShieldStatus.active else None,
+        )
+        db.add(shield)
+
+        # Write active shields to Redis so SOS can find them immediately
+        if status == ShieldStatus.active:
+            await db.flush()
+            await update_shield_location(str(shield.id), shield_lat, shield_lng, redis=redis)
+            active_shields_written += 1
+
+        if (i + 1) % 50 == 0:
+            await db.flush()
+
+    await db.flush()
+
+    # ── Hotspot data for Heilbronn + Stuttgart ─────────────────────────────────
+    hotspot_geohashes: set[str] = {
+        encode_geohash(h["lat"], h["lng"], precision=6)
+        for h in _LARGE_SEED_HOTSPOTS
+    }
+    await db.execute(
+        delete(HotspotData).where(HotspotData.geohash.in_(list(hotspot_geohashes)))
+    )
+
+    rows_by_gh: dict[str, HotspotData] = {}
+    for h in _LARGE_SEED_HOTSPOTS:
+        gh = encode_geohash(h["lat"], h["lng"], precision=6)
+        last_ts = now - timedelta(days=h["days_ago"], hours=rng.randint(0, 4))
+
+        if gh in rows_by_gh:
+            row = rows_by_gh[gh]
+            total = sum(h["hours"].values())
+            row.incident_count += total
+            if last_ts > row.last_incident:
+                row.last_incident = last_ts
+            td: dict[str, int] = dict(row.time_distribution or {})
+            for hr, cnt in h["hours"].items():
+                td[str(hr)] = td.get(str(hr), 0) + cnt
+            row.time_distribution = td
+            flag_modified(row, "time_distribution")
+        else:
+            rows_by_gh[gh] = HotspotData(
+                geohash=gh,
+                incident_count=sum(h["hours"].values()),
+                last_incident=last_ts,
+                time_distribution={str(hr): cnt for hr, cnt in h["hours"].items()},
+            )
+
+    for row in rows_by_gh.values():
+        db.add(row)
+
+    await db.flush()
+
+    logger.info(
+        "Large seed complete: %d persons, %d shields (%d active), %d hotspot cells",
+        n_persons, n_shields, active_shields_written, len(rows_by_gh),
+    )
+
+    return LargeSeedResponse(
+        seeded=True,
+        persons=n_persons,
+        shields=n_shields,
+        active_shields=n_active,
+        inactive_shields=n_inactive,
+        pending_shields=n_shields - n_active - n_inactive,
+        hotspot_cells_seeded=len(rows_by_gh),
+    )
