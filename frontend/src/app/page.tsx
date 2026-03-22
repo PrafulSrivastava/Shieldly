@@ -385,17 +385,41 @@ export default function HomePage() {
         {/* Floating mini voice agent card — top-right */}
         <div className="absolute top-[env(safe-area-inset-top,16px)] right-4 z-[1001] w-[220px]">
           <div className="bg-white/90 backdrop-blur-md rounded-2xl border border-lavender-muted shadow-soft p-3 flex flex-col items-center gap-1.5">
-            <div className="flex items-center gap-2">
-              <VoiceWaveform isSpeaking={voice.isSpeaking} compact />
-              <p
-                className={`font-body text-[9px] tracking-[0.08em] font-semibold uppercase whitespace-nowrap ${
-                  voice.connected
-                    ? "text-sage"
-                    : "text-warm-muted/30 animate-blink"
-                }`}
-              >
-                {voice.connected ? "Agent Connected" : "Connecting..."}
-              </p>
+            <div className="flex items-center justify-between w-full">
+              <div className="flex items-center gap-2">
+                <VoiceWaveform isSpeaking={voice.isSpeaking} compact />
+                <p
+                  className={`font-body text-[9px] tracking-[0.08em] font-semibold uppercase whitespace-nowrap ${
+                    voice.connected
+                      ? "text-sage"
+                      : "text-warm-muted/30 animate-blink"
+                  }`}
+                >
+                  {voice.connected ? "Agent Connected" : "Connecting..."}
+                </p>
+              </div>
+              {voice.connected && (
+                <button
+                  onClick={() => voice.stop()}
+                  title="I'm safe — end call"
+                  className="flex items-center gap-1 bg-[#16a34a] hover:bg-[#15803d] active:scale-95 transition-all rounded-full pl-2 pr-2.5 py-1 shadow-sm"
+                >
+                  <svg
+                    className="w-3 h-3 text-white"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2.5"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <polyline points="20 6 9 17 4 12" />
+                  </svg>
+                  <span className="font-body text-[9px] text-white font-semibold tracking-[0.06em] whitespace-nowrap">
+                    I&apos;m Safe
+                  </span>
+                </button>
+              )}
             </div>
             <TranscriptionFeed lines={voice.transcript} compact />
           </div>

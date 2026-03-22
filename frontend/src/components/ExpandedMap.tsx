@@ -62,17 +62,23 @@ function shieldIconColors(status: string): {
   }
 }
 
-function makeShieldIcon(name: string, status: string) {
+function makeShieldIcon(name: string, status: string, selected = false) {
   const c = shieldIconColors(status);
+  const size = selected ? 36 : 28;
+  const border = selected ? `2.5px solid #6B2E4F` : `1.5px solid ${c.border}`;
+  const shadow = selected
+    ? "box-shadow:0 0 12px rgba(107,46,79,0.4),0 0 24px rgba(107,46,79,0.15);"
+    : "";
   return L.divIcon({
     className: "",
     html: `<div style="
-      width:28px;height:28px;border-radius:50%;background:${c.bg};
-      border:1.5px solid ${c.border};display:flex;align-items:center;justify-content:center;
-      font-family:'Outfit',sans-serif;font-size:10px;font-weight:600;color:${c.text};
+      width:${size}px;height:${size}px;border-radius:50%;background:${selected ? "rgba(107,46,79,0.15)" : c.bg};
+      border:${border};display:flex;align-items:center;justify-content:center;
+      font-family:'Outfit',sans-serif;font-size:${selected ? 13 : 10}px;font-weight:600;color:${selected ? "#6B2E4F" : c.text};
+      cursor:pointer;transition:all 0.2s;${shadow}
     ">${name.charAt(0).toUpperCase()}</div>`,
-    iconSize: [28, 28],
-    iconAnchor: [14, 14],
+    iconSize: [size, size],
+    iconAnchor: [size / 2, size / 2],
   });
 }
 
@@ -147,36 +153,54 @@ export default function ExpandedMap({
   onClose,
   embedded,
 }: Props) {
-  const [fallbackRoute, setFallbackRoute] = useState<RouteToNearestShield | null>(null);
+  const [selectedShieldId, setSelectedShieldId] = useState<string | null>(null);
+  const [clickedRoute, setClickedRoute] = useState<RouteToNearestShield | null>(null);
+  const [routeLoading, setRouteLoading] = useState(false);
   const fetchIdRef = useRef(0);
 
+  // Auto-select nearest shield on first load
   useEffect(() => {
-    if (routeToShield || shields.length === 0) {
-      setFallbackRoute(null);
-      return;
-    }
+    if (routeToShield || shields.length === 0 || selectedShieldId) return;
     const closest = shields.reduce((best, sh) => {
       const d = haversine(position, { lat: sh.lat, lng: sh.lng });
       const bd = haversine(position, { lat: best.lat, lng: best.lng });
       return d < bd ? sh : best;
     }, shields[0]);
+    setSelectedShieldId(closest.shield_id);
+  }, [routeToShield, shields, position, selectedShieldId]);
+
+  // Fetch walking route whenever selected shield changes
+  useEffect(() => {
+    if (routeToShield || !selectedShieldId) {
+      setClickedRoute(null);
+      return;
+    }
+    const target = shields.find((s) => s.shield_id === selectedShieldId);
+    if (!target) return;
 
     const id = ++fetchIdRef.current;
+    setRouteLoading(true);
 
-    fetchWalkingRoute(position, closest).then((result) => {
+    fetchWalkingRoute(position, target).then((result) => {
       if (id !== fetchIdRef.current) return;
+      setRouteLoading(false);
       if (!result) return;
-      setFallbackRoute({
-        shield_id: closest.shield_id,
-        shield_name: closest.name,
+      setClickedRoute({
+        shield_id: target.shield_id,
+        shield_name: target.name,
         distance_meters: result.distance_meters,
         duration_seconds: result.duration_seconds,
         route_points: result.route_points,
       });
     });
-  }, [routeToShield, shields, position]);
+  }, [routeToShield, selectedShieldId, shields, position]);
 
-  const effectiveRoute = routeToShield ?? fallbackRoute;
+  const handleShieldClick = (shieldId: string) => {
+    setSelectedShieldId(shieldId);
+    setClickedRoute(null);
+  };
+
+  const effectiveRoute = routeToShield ?? clickedRoute;
 
   const routeLatLngs: L.LatLngTuple[] | null =
     effectiveRoute?.route_points?.length
@@ -244,7 +268,8 @@ export default function ExpandedMap({
           <Marker
             key={sh.shield_id}
             position={[sh.lat, sh.lng]}
-            icon={makeShieldIcon(sh.name, sh.status)}
+            icon={makeShieldIcon(sh.name, sh.status, sh.shield_id === selectedShieldId)}
+            eventHandlers={{ click: () => handleShieldClick(sh.shield_id) }}
           >
             <Popup>
               <span>
@@ -286,21 +311,33 @@ export default function ExpandedMap({
       </MapContainer>
 
       {/* Route info card */}
-      {effectiveRoute && (
+      {(effectiveRoute || routeLoading) && (
         <div className="absolute bottom-4 left-1/2 -translate-x-1/2 z-[1000]">
           <div className="bg-white/90 backdrop-blur-md rounded-2xl border border-lavender-muted shadow-soft px-4 py-2.5 flex items-center gap-3">
             <div className="w-8 h-8 rounded-full bg-plum/10 border border-plum/20 flex items-center justify-center">
-              <svg className="w-4 h-4 text-plum" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M5 12h14M12 5l7 7-7 7"/>
-              </svg>
+              {routeLoading ? (
+                <div className="w-4 h-4 border-2 border-plum/30 border-t-plum rounded-full animate-spin" />
+              ) : (
+                <svg className="w-4 h-4 text-plum" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M5 12h14M12 5l7 7-7 7"/>
+                </svg>
+              )}
             </div>
             <div className="flex flex-col">
-              <span className="font-body text-[11px] text-plum font-semibold tracking-[0.04em]">
-                Walking to {effectiveRoute.shield_name}
-              </span>
-              <span className="font-body text-[10px] text-warm-muted/60 tracking-[0.06em]">
-                {Math.ceil(effectiveRoute.duration_seconds / 60)} min · {effectiveRoute.distance_meters} m
-              </span>
+              {routeLoading ? (
+                <span className="font-body text-[11px] text-plum/50 font-semibold tracking-[0.04em]">
+                  Finding route…
+                </span>
+              ) : effectiveRoute ? (
+                <>
+                  <span className="font-body text-[11px] text-plum font-semibold tracking-[0.04em]">
+                    Walking to {effectiveRoute.shield_name}
+                  </span>
+                  <span className="font-body text-[10px] text-warm-muted/60 tracking-[0.06em]">
+                    {Math.ceil(effectiveRoute.duration_seconds / 60)} min · {effectiveRoute.distance_meters} m
+                  </span>
+                </>
+              ) : null}
             </div>
           </div>
         </div>
