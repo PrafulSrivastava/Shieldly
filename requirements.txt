@@ -26,6 +26,12 @@ httpx==0.28.1
 # Env
 python-dotenv==1.0.1
 
+# SafeCall agent (runs as separate process, shares virtualenv)
+elevenlabs>=1.0.0
+google-genai>=1.0.0
+certifi
+# pyaudio is only needed when running the agent locally — see requirements-agent.txt
+
 # Testing
 pytest==8.3.4
 pytest-asyncio==0.24.0
