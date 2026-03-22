@@ -4,24 +4,33 @@ import { useEffect, useRef, useState } from "react";
 
 interface Props {
   isSpeaking: boolean;
+  compact?: boolean;
 }
 
 const BAR_COUNT = 5;
-const MIN_H = 6;
-const MAX_H = 48;
+const COMPACT_BAR_COUNT = 3;
 
-export function VoiceWaveform({ isSpeaking }: Props) {
+export function VoiceWaveform({ isSpeaking, compact }: Props) {
+  const barCount = compact ? COMPACT_BAR_COUNT : BAR_COUNT;
+  const minH = compact ? 4 : 6;
+  const maxH = compact ? 20 : 48;
+
   const [heights, setHeights] = useState<number[]>(
-    Array(BAR_COUNT).fill(MIN_H),
+    Array(barCount).fill(minH),
   );
   const rafRef = useRef<number>(0);
-  const targetRef = useRef<number[]>(Array(BAR_COUNT).fill(MIN_H));
-  const currentRef = useRef<number[]>(Array(BAR_COUNT).fill(MIN_H));
+  const targetRef = useRef<number[]>(Array(barCount).fill(minH));
+  const currentRef = useRef<number[]>(Array(barCount).fill(minH));
 
   useEffect(() => {
+    if (currentRef.current.length !== barCount) {
+      currentRef.current = Array(barCount).fill(minH);
+      targetRef.current = Array(barCount).fill(minH);
+    }
+
     const retarget = () => {
-      targetRef.current = Array.from({ length: BAR_COUNT }, () =>
-        isSpeaking ? MIN_H + Math.random() * (MAX_H - MIN_H) : MIN_H,
+      targetRef.current = Array.from({ length: barCount }, () =>
+        isSpeaking ? minH + Math.random() * (maxH - minH) : minH,
       );
     };
 
@@ -43,14 +52,20 @@ export function VoiceWaveform({ isSpeaking }: Props) {
       clearInterval(interval);
       cancelAnimationFrame(rafRef.current);
     };
-  }, [isSpeaking]);
+  }, [isSpeaking, barCount, minH, maxH]);
 
   return (
-    <div className="flex items-end justify-center gap-[5px] h-14">
+    <div
+      className={`flex items-end justify-center ${
+        compact ? "gap-[3px] h-6" : "gap-[5px] h-14"
+      }`}
+    >
       {heights.map((h, i) => (
         <div
           key={i}
-          className="w-[6px] rounded-full bg-gradient-to-t from-coral to-coral/50"
+          className={`rounded-full bg-gradient-to-t from-coral to-coral/50 ${
+            compact ? "w-[4px]" : "w-[6px]"
+          }`}
           style={{ height: h, transition: "none" }}
         />
       ))}

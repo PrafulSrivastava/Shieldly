@@ -26,13 +26,48 @@ const personIcon = L.divIcon({
   iconAnchor: [7, 7],
 });
 
-function makeShieldIcon(name: string) {
+function shieldIconColors(status: string): {
+  bg: string;
+  border: string;
+  text: string;
+} {
+  switch (status) {
+    case "responding":
+    case "arrived":
+      return {
+        bg: "rgba(74,222,128,0.2)",
+        border: "#4ADE80",
+        text: "#166534",
+      };
+    case "declined":
+      return {
+        bg: "rgba(248,113,113,0.2)",
+        border: "#F87171",
+        text: "#991B1B",
+      };
+    case "notified":
+      return {
+        bg: "rgba(251,191,36,0.2)",
+        border: "#FBBF24",
+        text: "#92400E",
+      };
+    default:
+      return {
+        bg: "rgba(184,207,192,0.2)",
+        border: "#B8CFC0",
+        text: "#6B2E4F",
+      };
+  }
+}
+
+function makeShieldIcon(name: string, status: string) {
+  const c = shieldIconColors(status);
   return L.divIcon({
     className: "",
     html: `<div style="
-      width:28px;height:28px;border-radius:50%;background:rgba(184,207,192,0.2);
-      border:1.5px solid #B8CFC0;display:flex;align-items:center;justify-content:center;
-      font-family:'Outfit',sans-serif;font-size:10px;font-weight:600;color:#6B2E4F;
+      width:28px;height:28px;border-radius:50%;background:${c.bg};
+      border:1.5px solid ${c.border};display:flex;align-items:center;justify-content:center;
+      font-family:'Outfit',sans-serif;font-size:10px;font-weight:600;color:${c.text};
     ">${name.charAt(0).toUpperCase()}</div>`,
     iconSize: [28, 28],
     iconAnchor: [14, 14],
@@ -68,7 +103,8 @@ interface Props {
   shields: ShieldStatusInfo[];
   convergence: LatLng | null;
   respondingCount: number;
-  onClose: () => void;
+  onClose?: () => void;
+  embedded?: boolean;
 }
 
 export default function ExpandedMap({
@@ -77,29 +113,34 @@ export default function ExpandedMap({
   convergence,
   respondingCount,
   onClose,
+  embedded,
 }: Props) {
-  const responding = shields.filter(
-    (s) => s.status === "responding" || s.status === "arrived",
-  );
-
   return (
-    <div className="fixed inset-0 z-50 bg-bg/95 backdrop-blur-sm animate-fade-in">
-      {/* Header bar */}
-      <div className="absolute top-0 left-0 right-0 z-[1000] flex items-center justify-between px-5 py-4 bg-gradient-to-b from-bg/90 to-transparent">
-        <div className="flex items-center gap-2.5">
-          <span className="w-2 h-2 rounded-full bg-sage animate-dot-pulse" />
-          <span className="font-body text-[11px] text-plum tracking-[0.1em] font-semibold">
-            {respondingCount} Shield{respondingCount !== 1 ? "s" : ""}{" "}
-            Responding
-          </span>
+    <div
+      className={
+        embedded
+          ? "absolute inset-0"
+          : "fixed inset-0 z-50 bg-bg/95 backdrop-blur-sm animate-fade-in"
+      }
+    >
+      {/* Header bar — overlay mode only */}
+      {!embedded && onClose && (
+        <div className="absolute top-0 left-0 right-0 z-[1000] flex items-center justify-between px-5 py-4 bg-gradient-to-b from-bg/90 to-transparent">
+          <div className="flex items-center gap-2.5">
+            <span className="w-2 h-2 rounded-full bg-sage animate-dot-pulse" />
+            <span className="font-body text-[11px] text-plum tracking-[0.1em] font-semibold">
+              {respondingCount} Shield{respondingCount !== 1 ? "s" : ""}{" "}
+              Responding
+            </span>
+          </div>
+          <button
+            onClick={onClose}
+            className="w-9 h-9 rounded-full bg-white border border-lavender-muted shadow-soft flex items-center justify-center hover:bg-blush transition-colors"
+          >
+            <X className="w-4 h-4 text-plum/50" />
+          </button>
         </div>
-        <button
-          onClick={onClose}
-          className="w-9 h-9 rounded-full bg-white border border-lavender-muted shadow-soft flex items-center justify-center hover:bg-blush transition-colors"
-        >
-          <X className="w-4 h-4 text-plum/50" />
-        </button>
-      </div>
+      )}
 
       {/* Map */}
       <MapContainer
@@ -132,18 +173,18 @@ export default function ExpandedMap({
         <Marker position={[position.lat, position.lng]} icon={personIcon} />
 
         {/* Shields */}
-        {responding.map((sh) => (
+        {shields.map((sh) => (
           <Marker
             key={sh.shield_id}
             position={[sh.lat, sh.lng]}
-            icon={makeShieldIcon(sh.name)}
+            icon={makeShieldIcon(sh.name, sh.status)}
           >
             <Popup>
               <span>
-                {sh.name} ·{" "}
+                {sh.name} · {sh.status}
                 {sh.eta_seconds
-                  ? `${Math.ceil(sh.eta_seconds / 60)} min`
-                  : "en route"}
+                  ? ` · ${Math.ceil(sh.eta_seconds / 60)} min`
+                  : ""}
               </span>
             </Popup>
           </Marker>

@@ -4,7 +4,7 @@ import logging
 from uuid import UUID
 
 import redis.asyncio as aioredis
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -17,12 +17,14 @@ from app.redis_client import get_redis
 from app.routers.auth import get_current_user, require_shield
 from app.schemas.location import (
     IncidentLocationsResponse,
+    NearbyShieldResponse,
     PersonLocationResponse,
     ShieldLocationResponse,
     UpdateLocationRequest,
 )
 from app.services.incident_service import compute_context_update_if_needed
 from app.services.location_service import (
+    get_active_shields_near,
     get_incident_all_locations,
     update_person_location,
     update_responding_shield_location,
@@ -149,3 +151,24 @@ async def get_incident_all_live_locations(
         ),
         shields=[ShieldLocationResponse(**s) for s in data["shields"]],
     )
+
+
+# ── GET /location/shields/nearby ─────────────────────────────────────────────
+
+@router.get(
+    "/shields/nearby",
+    response_model=list[NearbyShieldResponse],
+    summary="Get nearby active shields with positions",
+)
+async def get_nearby_shields(
+    lat: float = Query(..., ge=-90.0, le=90.0),
+    lng: float = Query(..., ge=-180.0, le=180.0),
+    _user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+) -> list[NearbyShieldResponse]:
+    """Return active verified shields within ~3 km of the given coordinates.
+
+    Used by the frontend to display shield blips on the idle-phase mini-map.
+    """
+    nearby = await get_active_shields_near(lat, lng, radius_km=1.0, db=db)
+    return [NearbyShieldResponse(**s) for s in nearby]

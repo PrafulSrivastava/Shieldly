@@ -43,6 +43,9 @@ export default function HomePage() {
   const { position, error: geoError } = useGeolocation();
   const { heading, requestPermission } = useDeviceOrientation();
   const [shieldCount, setShieldCount] = useState(0);
+  const [nearbyShields, setNearbyShields] = useState<
+    import("@/lib/types").ShieldStatusInfo[]
+  >([]);
   const [convergenceLabel, setConvergenceLabel] = useState<string | null>(null);
   const [hovered, setHovered] = useState(false);
 
@@ -85,6 +88,21 @@ export default function HomePage() {
       api
         .getHotspotContext(position.lat, position.lng)
         .then((ctx) => setShieldCount(ctx.shield_count_nearby))
+        .catch(() => {});
+      api
+        .getNearbyShields(position.lat, position.lng)
+        .then((shields) =>
+          setNearbyShields(
+            shields.map((s) => ({
+              shield_id: s.shield_id,
+              name: s.name,
+              lat: s.lat,
+              lng: s.lng,
+              status: "active",
+              eta_seconds: null,
+            })),
+          ),
+        )
         .catch(() => {});
     };
     poll();
@@ -213,6 +231,7 @@ export default function HomePage() {
   const respondingShields = liveShields.filter(
     (s) => s.status === "responding" || s.status === "arrived",
   );
+  const allIncidentShields = liveShields;
 
   /* ── Render ────────────────────────────────────────────────────────── */
 
@@ -252,9 +271,9 @@ export default function HomePage() {
         <div className="absolute bottom-[env(safe-area-inset-bottom,24px)] left-6 z-20">
           <MiniMap
             position={position}
-            shields={[]}
+            shields={nearbyShields}
             convergence={null}
-            size={80}
+            size={160}
             onExpand={() => setMapExpanded(true)}
           />
         </div>
@@ -274,30 +293,50 @@ export default function HomePage() {
           isActive ? "opacity-100 z-10" : "opacity-0 z-0 pointer-events-none"
         }`}
       >
-        {/* Alert gradient — warm coral tint */}
-        <div className="absolute inset-0 bg-gradient-to-br from-coral/[0.04] via-bg to-bg" />
-        <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top_left,rgba(232,99,74,0.06),transparent_60%)]" />
+        {/* Full-screen map — main view */}
+        {position && (
+          <ExpandedMap
+            position={position}
+            shields={allIncidentShields}
+            convergence={convergence}
+            respondingCount={respondingShields.length}
+            embedded
+          />
+        )}
 
-        <div className="relative z-10 h-full flex flex-col">
-          {/* Voice agent */}
-          <div className="flex-none pt-[env(safe-area-inset-top,32px)] pb-2 px-6 flex flex-col items-center gap-3">
-            <VoiceWaveform isSpeaking={voice.isSpeaking} />
-            <p
-              className={`font-body text-[11px] tracking-[0.1em] font-semibold uppercase ${
-                voice.connected
-                  ? "text-sage"
-                  : "text-warm-muted/30 animate-blink"
-              }`}
-            >
-              {voice.connected
-                ? "Shield Agent Connected"
-                : "Connecting Agent..."}
-            </p>
-            <TranscriptionFeed lines={voice.transcript} />
+        {/* Floating shield status badge — top-left */}
+        <div className="absolute top-[env(safe-area-inset-top,16px)] left-4 z-[1001]">
+          <div className="flex items-center gap-2 bg-white/90 backdrop-blur-md rounded-full px-3 py-1.5 border border-lavender-muted shadow-soft">
+            <span className="w-2 h-2 rounded-full bg-sage animate-dot-pulse" />
+            <span className="font-body text-[11px] text-plum tracking-[0.08em] font-semibold">
+              {respondingShields.length} Shield
+              {respondingShields.length !== 1 ? "s" : ""} Responding
+            </span>
           </div>
+        </div>
 
-          {/* Navigation arrow */}
-          <div className="flex-1 flex items-center justify-center min-h-0">
+        {/* Floating mini voice agent card — top-right */}
+        <div className="absolute top-[env(safe-area-inset-top,16px)] right-4 z-[1001] w-[220px]">
+          <div className="bg-white/90 backdrop-blur-md rounded-2xl border border-lavender-muted shadow-soft p-3 flex flex-col items-center gap-1.5">
+            <div className="flex items-center gap-2">
+              <VoiceWaveform isSpeaking={voice.isSpeaking} compact />
+              <p
+                className={`font-body text-[9px] tracking-[0.08em] font-semibold uppercase whitespace-nowrap ${
+                  voice.connected
+                    ? "text-sage"
+                    : "text-warm-muted/30 animate-blink"
+                }`}
+              >
+                {voice.connected ? "Agent Connected" : "Connecting..."}
+              </p>
+            </div>
+            <TranscriptionFeed lines={voice.transcript} compact />
+          </div>
+        </div>
+
+        {/* Floating navigation card — bottom-left */}
+        <div className="absolute bottom-[env(safe-area-inset-bottom,24px)] left-4 z-[1001]">
+          <div className="bg-white/90 backdrop-blur-md rounded-2xl border border-lavender-muted shadow-soft p-3">
             <NavigationArrow
               position={position}
               target={convergence}
@@ -305,18 +344,11 @@ export default function HomePage() {
               label={convergenceLabel}
             />
           </div>
+        </div>
 
-          {/* Bottom controls */}
-          <div className="flex-none px-6 pb-[env(safe-area-inset-bottom,32px)] flex items-end justify-between">
-            <MiniMap
-              position={position}
-              shields={respondingShields}
-              convergence={convergence}
-              size={110}
-              onExpand={() => setMapExpanded(true)}
-            />
-            <AllClearButton onConfirm={handleAllClear} />
-          </div>
+        {/* Floating AllClearButton — bottom-right */}
+        <div className="absolute bottom-[env(safe-area-inset-bottom,24px)] right-4 z-[1001]">
+          <AllClearButton onConfirm={handleAllClear} />
         </div>
       </div>
 
@@ -347,11 +379,11 @@ export default function HomePage() {
         </p>
       </div>
 
-      {/* ═══════════════════════════════════════ MAP OVERLAY ════════════ */}
-      {mapExpanded && position && (
+      {/* ═══════════════════════════════════════ MAP OVERLAY (idle) ═════ */}
+      {mapExpanded && !isActive && position && (
         <ExpandedMap
           position={position}
-          shields={respondingShields}
+          shields={isIdle ? nearbyShields : allIncidentShields}
           convergence={convergence}
           respondingCount={respondingShields.length}
           onClose={() => setMapExpanded(false)}

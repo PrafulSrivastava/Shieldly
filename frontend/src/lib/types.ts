@@ -103,6 +103,17 @@ export interface IncidentLocationsResponse {
   shields: ShieldLocationResponse[];
 }
 
+/* ── Nearby Shields (idle) ────────────────────────────────────────────── */
+
+export interface NearbyShieldInfo {
+  shield_id: string;
+  user_id: string;
+  name: string;
+  lat: number;
+  lng: number;
+  distance_km: number;
+}
+
 /* ── Hotspots ─────────────────────────────────────────────────────────── */
 
 export interface HotspotContextResponse {

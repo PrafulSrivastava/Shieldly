@@ -11,6 +11,20 @@ interface Props {
   onExpand: () => void;
 }
 
+function shieldColor(status: string): string {
+  switch (status) {
+    case "responding":
+    case "arrived":
+      return "#4ADE80";
+    case "declined":
+      return "#F87171";
+    case "notified":
+      return "#FBBF24";
+    default:
+      return "#B8CFC0";
+  }
+}
+
 function toRadar(
   person: LatLng,
   target: LatLng,
@@ -19,7 +33,7 @@ function toRadar(
   const mPerDegLng = 111_320 * Math.cos((person.lat * Math.PI) / 180);
   const dx = (target.lng - person.lng) * mPerDegLng;
   const dy = (target.lat - person.lat) * 111_320;
-  const scale = r / 1_000;
+  const scale = r / 2_000;
   const px = r + dx * scale;
   const py = r - dy * scale;
   const dist = Math.hypot(px - r, py - r);
@@ -97,7 +111,7 @@ export function MiniMap({
           if (sp) {
             ctx.beginPath();
             ctx.arc(sp.x, sp.y, 2.5, 0, Math.PI * 2);
-            ctx.fillStyle = "#B8CFC0";
+            ctx.fillStyle = shieldColor(sh.status);
             ctx.fill();
           }
         });

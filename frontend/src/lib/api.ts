@@ -13,6 +13,7 @@ import type {
   TrackingResponse,
   RespondToIncidentRequest,
   RespondToIncidentResponse,
+  NearbyShieldInfo,
 } from "./types";
 
 export class ApiError extends Error {
@@ -98,6 +99,13 @@ export const api = {
     request<IncidentLocationsResponse>(
       "GET",
       `/api/v1/location/incident/${incidentId}/all`,
+    ),
+
+  /* ── Nearby shields ──────────────────────────────────────────────── */
+  getNearbyShields: (lat: number, lng: number) =>
+    request<NearbyShieldInfo[]>(
+      "GET",
+      `/api/v1/location/shields/nearby?lat=${lat}&lng=${lng}`,
     ),
 
   /* ── Hotspots ─────────────────────────────────────────────────────── */
