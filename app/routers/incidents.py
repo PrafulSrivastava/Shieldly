@@ -132,7 +132,7 @@ async def get_incident(
     Requires: authenticated user (person or shield).
     """
     return await incident_service.get_incident_detail(
-        incident_id, db=db, redis=redis
+        incident_id, db=db, redis=redis, requesting_user_id=user.id
     )
 
 

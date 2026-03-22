@@ -1,0 +1,66 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --color-void: #0a0a0f;
+  --color-danger: #ff1744;
+  --color-amber: #ff9800;
+  --color-shield: #00e676;
+}
+
+html,
+body {
+  background: var(--color-void);
+  overflow: hidden;
+  height: 100%;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+
+/* ── Minimap scanline effect ─────────────────────────────────────────── */
+.scanline-overlay {
+  background: repeating-linear-gradient(
+    0deg,
+    transparent,
+    transparent 2px,
+    rgba(0, 0, 0, 0.1) 2px,
+    rgba(0, 0, 0, 0.1) 4px
+  );
+}
+
+/* ── Leaflet customisation ───────────────────────────────────────────── */
+.leaflet-popup-content-wrapper {
+  background: #12121a !important;
+  color: #fff !important;
+  border-radius: 10px !important;
+  border: 1px solid #252530 !important;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.6) !important;
+  font-family: var(--font-mono), "IBM Plex Mono", monospace !important;
+  font-size: 11px !important;
+}
+.leaflet-popup-tip {
+  background: #12121a !important;
+}
+.leaflet-popup-close-button {
+  color: rgba(255, 255, 255, 0.3) !important;
+}
+
+/* ── Scrollbar ───────────────────────────────────────────────────────── */
+::-webkit-scrollbar {
+  width: 3px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.06);
+  border-radius: 2px;
+}
+
+/* ── Dynamic viewport height fallback ────────────────────────────────── */
+@supports (height: 100dvh) {
+  .h-dvh {
+    height: 100dvh;
+  }
+}

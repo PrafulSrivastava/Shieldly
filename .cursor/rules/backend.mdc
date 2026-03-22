@@ -146,16 +146,16 @@ Use FastAPI `BackgroundTasks` for fire-and-forget operations (SMS, push notifica
 Background tasks must NEVER raise — catch all exceptions.
 
 ```python
-async def send_emergency_contact_sos(contact_phone: str, person_name: str, lat: float, lng: float):
+async def send_emergency_contact_sos(contact_phone: str, person_name: str, lat: float, lng: float, tracking_url: str):
     try:
         if settings.MOCK_SMS:
-            logger.info(f"[MOCK SMS] SOS to {contact_phone} for {person_name} at {lat},{lng}")
+            logger.info(f"[MOCK SMS] SOS to …{contact_phone[-4:]} for {person_name}")
             return
-        # real Twilio call
+        # real Brevo call
         async with httpx.AsyncClient() as client:
             ...
     except Exception:
-        logger.exception(f"Failed to send SOS SMS to {contact_phone}")
+        logger.exception(f"Failed to send SOS SMS to …{contact_phone[-4:]}")
 ```
 
 ## Config Access

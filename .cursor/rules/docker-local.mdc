@@ -23,7 +23,7 @@ Local dev uses `.env` (gitignored). `.env.example` is committed and stays in syn
 **Mock toggles for local testing (no real credentials needed):**
 ```
 MOCK_FIREBASE=true    # Skip real Firebase token verification
-MOCK_SMS=true         # Print SMS to console instead of calling Twilio
+MOCK_SMS=true         # Print SMS to console instead of calling Brevo
 MOCK_MAPS=true        # Return fake Directions API response
 MOCK_GEMINI=true      # Return hardcoded safety summary
 APP_ENV=development   # Enables /dev/* seed endpoints
@@ -31,7 +31,7 @@ APP_ENV=development   # Enables /dev/* seed endpoints
 
 **Real credentials only needed for:**
 - Integration testing against live Firebase
-- Testing real SMS delivery via Twilio
+- Testing real SMS delivery via Brevo
 - Live Google Maps routing
 - Gemini AI summaries
 

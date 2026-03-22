@@ -14,7 +14,7 @@ ShieldHer is a real-time women's safety broadcast network. When a woman triggers
 - **Cache / Pub-Sub**: Redis 7 (redis-py asyncio)
 - **Migrations**: Alembic (async)
 - **Auth**: Firebase Phone OTP → internal JWT (python-jose)
-- **SMS**: Twilio via httpx (not the Twilio SDK)
+- **SMS**: Brevo Transactional SMS via httpx
 - **Maps**: Google Maps Directions API via httpx
 - **AI**: Gemini 1.5 Flash via httpx
 - **Voice**: ElevenLabs

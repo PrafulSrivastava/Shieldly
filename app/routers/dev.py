@@ -335,7 +335,7 @@ async def trigger_test_sos(
 
     await db.flush()
 
-    return await incident_service.trigger_sos(
+    result = await incident_service.trigger_sos(
         person,
         _CENTRE_LAT,
         _CENTRE_LNG,
@@ -343,6 +343,8 @@ async def trigger_test_sos(
         redis=redis,
         background_tasks=background_tasks,
     )
+    logger.info("[DEV] Tracking URL: %s", result.tracking_url)
+    return result
 
 
 @router.post(
@@ -416,8 +418,8 @@ async def mock_shield_respond(
     response_model=TestSMSResponse,
     summary="Send a test SOS SMS",
     description=(
-        "Fires a test SOS SMS through the SMS pipeline (real Twilio call or mock "
-        "depending on MOCK_SMS). Useful for verifying Twilio credentials locally "
+        "Fires a test SOS SMS through the SMS pipeline (real Brevo call or mock "
+        "depending on MOCK_SMS). Useful for verifying Brevo credentials locally "
         "without triggering a real incident. **Development only.**"
     ),
 )
@@ -425,13 +427,20 @@ async def send_test_sms(
     body: TestSMSRequest,
     background_tasks: BackgroundTasks,
 ) -> TestSMSResponse:
+    import secrets
+    from app.services.incident_service import generate_tracking_url
+    tracking_url = generate_tracking_url(secrets.token_urlsafe(32))
     background_tasks.add_task(
         send_emergency_contact_sos,
-        incident_id="test-00000000-0000-0000-0000-000000000000",
-        person_name=body.person_name,
         contact_phone=body.to,
+        person_name=body.person_name,
         lat=body.lat,
         lng=body.lng,
+        tracking_url=tracking_url,
+    )
+    logger.info(
+        "[DEV] SMS would be sent via Brevo to …%s — set MOCK_SMS=false to enable real delivery",
+        body.to[-4:],
     )
     return TestSMSResponse(
         queued=True,

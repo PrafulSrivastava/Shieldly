@@ -31,7 +31,9 @@ from app.schemas.incidents import (
     ShieldStatusInfo,
     TriggerSOSResponse,
 )
+from app.config import settings
 from app.services.push_service import send_to_shield
+from app.services import sms_service
 from app.services.sms_service import (
     send_emergency_contact_all_clear,
     send_emergency_contact_sos,
@@ -62,6 +64,17 @@ def _shield_loc_key(shield_id: str) -> str:
 
 def _incident_person_loc_key(incident_id: str) -> str:
     return f"shieldher:incident:location:{incident_id}"
+
+
+def generate_tracking_url(tracking_token: str) -> str:
+    return f"{settings.frontend_base_url}/track/{tracking_token}"
+
+
+async def get_by_tracking_token(db: AsyncSession, token: str) -> Incident | None:
+    result = await db.execute(
+        select(Incident).where(Incident.tracking_token == token)
+    )
+    return result.scalar_one_or_none()
 
 
 # ── Public service functions ──────────────────────────────────────────────────
@@ -112,7 +125,10 @@ async def trigger_sos(
         )
     await db.flush()
 
-    # Step 4 — push notifications (fire-and-forget; errors must not fail the request)
+    # Step 4 — tracking URL (generated from the token created at incident birth)
+    tracking_url = generate_tracking_url(incident.tracking_token)
+
+    # Step 5 — push notifications (fire-and-forget; errors must not fail the request)
     await asyncio.gather(
         *[
             send_to_shield(
@@ -125,6 +141,7 @@ async def trigger_sos(
                     "lat": incident.trigger_lat,
                     "lng": incident.trigger_lng,
                     "distance_km": round(s["distance_km"], 2),
+                    "tracking_url": tracking_url,
                 },
                 db=db,
             )
@@ -133,18 +150,26 @@ async def trigger_sos(
         return_exceptions=True,
     )
 
-    # Step 5 — SMS (background task; runs after response is sent)
+    # Step 6 — SMS (background task; runs after response is sent)
     if user.emergency_contact_phone:
         background_tasks.add_task(
             send_emergency_contact_sos,
-            incident_id=str(incident.id),
-            person_name=user.name,
             contact_phone=user.emergency_contact_phone,
+            person_name=user.name,
             lat=lat,
             lng=lng,
+            tracking_url=tracking_url,
+        )
+        background_tasks.add_task(
+            escalation_watcher,
+            incident_id=incident.id,
+            user_id=user.id,
+            emergency_contact_phone=user.emergency_contact_phone,
+            person_name=user.name,
+            tracking_url=tracking_url,
         )
 
-    # Step 6 — Redis incident state cache
+    # Step 7 — Redis incident state cache
     await redis.set(
         _state_key(incident.id),
         json.dumps(
@@ -162,11 +187,12 @@ async def trigger_sos(
         ex=_INCIDENT_STATE_TTL,
     )
 
-    # Step 7 — return
+    # Step 8 — return
     return TriggerSOSResponse(
         incident_id=incident.id,
         shields_notified=len(nearby),
         convergence_point=None,
+        tracking_url=tracking_url,
     )
 
 
@@ -352,11 +378,55 @@ async def resolve_incident(
     return zone_summary
 
 
+async def escalation_watcher(
+    incident_id: UUID,
+    user_id: UUID,
+    emergency_contact_phone: str,
+    person_name: str,
+    tracking_url: str,
+) -> None:
+    """Background task: wait 90s, then send escalation SMS if no Shield has responded.
+
+    Runs as a fire-and-forget BackgroundTask — must never raise.
+    """
+    try:
+        await asyncio.sleep(90)
+
+        from app.database import AsyncSessionLocal
+
+        async with AsyncSessionLocal() as db:
+            result = await db.execute(
+                select(Incident).where(Incident.id == incident_id)
+            )
+            incident: Incident | None = result.scalar_one_or_none()
+            if not incident or incident.status != IncidentStatus.active:
+                return
+
+            responding = (
+                await db.execute(
+                    select(IncidentResponse).where(
+                        IncidentResponse.incident_id == incident_id,
+                        IncidentResponse.status == ResponseStatus.responding,
+                    )
+                )
+            ).scalars().all()
+
+            if len(responding) == 0:
+                await sms_service.send_emergency_contact_escalation(
+                    contact_phone=emergency_contact_phone,
+                    person_name=person_name,
+                    tracking_url=tracking_url,
+                )
+    except Exception:
+        logger.exception("Escalation watcher failed for incident %s", incident_id)
+
+
 async def get_incident_detail(
     incident_id: UUID,
     *,
     db: AsyncSession,
     redis: aioredis.Redis,
+    requesting_user_id: UUID | None = None,
 ) -> IncidentDetailResponse:
     """Return full incident state with real ETAs via Google Maps Directions API.
 
@@ -442,6 +512,10 @@ async def get_incident_detail(
             )
         )
 
+    tracking_url: str | None = None
+    if requesting_user_id is not None and incident.triggered_by == requesting_user_id:
+        tracking_url = generate_tracking_url(incident.tracking_token)
+
     return IncidentDetailResponse(
         incident_id=incident.id,
         status=incident.status.value,
@@ -453,6 +527,7 @@ async def get_incident_detail(
         shields_notified=len(rows),
         shields=shields_info,
         person_polyline=person_polyline,
+        tracking_url=tracking_url,
     )
 
 

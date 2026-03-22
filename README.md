@@ -52,7 +52,7 @@ Real-time women's safety broadcast network. When a woman triggers an SOS, verifi
 | Cache / Pub-Sub | Redis 7 |
 | Migrations | Alembic |
 | Auth | Firebase Phone OTP → internal JWT (python-jose) |
-| SMS | Twilio via httpx |
+| SMS | Brevo Transactional SMS via httpx |
 | Maps | Google Maps Directions API via httpx |
 | AI | Gemini 1.5 Flash via httpx |
 | Voice | ElevenLabs |
@@ -169,7 +169,7 @@ POST /api/v1/dev/test/sms
 Body: { "to": "+1234567890" }
 ```
 
-Fires the SMS pipeline. With `MOCK_SMS=true` this prints to console instead of calling Twilio.
+Fires the SMS pipeline. With `MOCK_SMS=true` this prints to console instead of calling Brevo.
 
 ---
 
@@ -284,9 +284,7 @@ Copy `.env.example` to `.env` and fill in the values below.
 |---|---|
 | `JWT_SECRET` | Secret used to sign JWTs. Use any long random string locally. |
 | `FIREBASE_PROJECT_ID` | Your Firebase project ID (e.g. `my-app-12345`) |
-| `TWILIO_ACCOUNT_SID` | Twilio account SID (`ACxxx...`) |
-| `TWILIO_AUTH_TOKEN` | Twilio auth token |
-| `TWILIO_PHONE_NUMBER` | Twilio sender number in E.164 format (e.g. `+15005550006`) |
+| `BREVO_API_KEY` | Brevo API key for Transactional SMS (leave blank with `MOCK_SMS=true`) |
 | `GOOGLE_MAPS_API_KEY` | Google Maps Directions API key |
 | `GEMINI_API_KEY` | Google Gemini API key |
 | `ELEVENLABS_API_KEY` | ElevenLabs API key |
@@ -311,7 +309,7 @@ Set any of these to `true` in your `.env` to test without real credentials:
 | Variable | What it skips |
 |---|---|
 | `MOCK_FIREBASE=true` | Firebase token verification (accepts any token in dev) |
-| `MOCK_SMS=true` | Twilio SMS (logs to console instead) |
+| `MOCK_SMS=true` | Brevo SMS (logs to console instead) |
 | `MOCK_MAPS=true` | Google Maps Directions API (returns a fake route) |
 | `MOCK_GEMINI=true` | Gemini AI (returns a hardcoded safety summary) |
 | `MOCK_ELEVENLABS=true` | ElevenLabs (returns hardcoded `wss://` URL, no real session) |
@@ -322,9 +320,8 @@ Set any of these to `true` in your `.env` to test without real credentials:
 APP_ENV=development
 JWT_SECRET=any-long-random-string-here
 FIREBASE_PROJECT_ID=mock
-TWILIO_ACCOUNT_SID=mock
-TWILIO_AUTH_TOKEN=mock
-TWILIO_PHONE_NUMBER=+15005550006
+BREVO_API_KEY=mock
+BREVO_SENDER_NAME=ShieldHer
 GOOGLE_MAPS_API_KEY=mock
 GEMINI_API_KEY=mock
 ELEVENLABS_API_KEY=mock

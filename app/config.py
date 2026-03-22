@@ -14,6 +14,9 @@ class Settings(BaseSettings):
     app_env: str = Field(default="development", alias="APP_ENV")
     app_host: str = Field(default="0.0.0.0", alias="APP_HOST")
     app_port: int = Field(default=8000, alias="APP_PORT")
+    frontend_base_url: str = Field(
+        default="http://localhost:3000", alias="FRONTEND_BASE_URL"
+    )
 
     # ── Database ───────────────────────────────────────────────────────────────
     database_url: str = Field(
@@ -34,10 +37,12 @@ class Settings(BaseSettings):
     # Required in production (MOCK_FIREBASE=false); safe to leave blank locally.
     firebase_api_key: str = Field(default="", alias="FIREBASE_API_KEY")
 
-    # ── Twilio ─────────────────────────────────────────────────────────────────
-    twilio_account_sid: str = Field(alias="TWILIO_ACCOUNT_SID")
-    twilio_auth_token: str = Field(alias="TWILIO_AUTH_TOKEN")
-    twilio_phone_number: str = Field(alias="TWILIO_PHONE_NUMBER")
+    # ── Brevo (Transactional SMS) ────────────────────────────────────────────
+    brevo_api_key: str = Field(default="", alias="BREVO_API_KEY")
+    brevo_sender_name: str = Field(default="ShieldHer", alias="BREVO_SENDER_NAME")
+
+    # ── n8n webhooks ─────────────────────────────────────────────────────────
+    n8n_all_clear_webhook_url: str = Field(default="", alias="N8N_ALL_CLEAR_WEBHOOK_URL")
 
     # ── Google Maps ────────────────────────────────────────────────────────────
     google_maps_api_key: str = Field(alias="GOOGLE_MAPS_API_KEY")
@@ -55,7 +60,7 @@ class Settings(BaseSettings):
 
     # ── Mock toggles ───────────────────────────────────────────────────────────
     mock_firebase: bool = Field(default=False, alias="MOCK_FIREBASE")
-    mock_sms: bool = Field(default=False, alias="MOCK_SMS")
+    mock_sms: bool = Field(default=True, alias="MOCK_SMS")
     mock_maps: bool = Field(default=False, alias="MOCK_MAPS")
     mock_gemini: bool = Field(default=False, alias="MOCK_GEMINI")
     mock_push: bool = Field(default=False, alias="MOCK_PUSH")

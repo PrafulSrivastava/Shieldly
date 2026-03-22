@@ -1,11 +1,16 @@
 import enum
+import secrets
 from datetime import datetime
 from uuid import UUID, uuid4
 
-from sqlalchemy import DateTime, Enum as SAEnum, Float, ForeignKey, Index, func
+from sqlalchemy import DateTime, Enum as SAEnum, Float, ForeignKey, Index, String, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.database import Base
+
+
+def _generate_tracking_token() -> str:
+    return secrets.token_urlsafe(32)
 
 
 class IncidentStatus(enum.Enum):
@@ -27,6 +32,9 @@ class Incident(Base):
         SAEnum(IncidentStatus, name="incidentstatus"),
         nullable=False,
         default=IncidentStatus.active,
+    )
+    tracking_token: Mapped[str] = mapped_column(
+        String, unique=True, index=True, nullable=False, default=_generate_tracking_token
     )
     convergence_lat: Mapped[float | None] = mapped_column(Float, nullable=True)
     convergence_lng: Mapped[float | None] = mapped_column(Float, nullable=True)

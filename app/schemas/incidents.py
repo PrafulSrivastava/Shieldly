@@ -25,6 +25,7 @@ class TriggerSOSResponse(BaseModel):
     incident_id: UUID
     shields_notified: int
     convergence_point: ConvergencePoint | None = None
+    tracking_url: str
 
 
 # ── POST /incidents/{incident_id}/respond ─────────────────────────────────────
@@ -91,5 +92,5 @@ class IncidentDetailResponse(BaseModel):
     resolved_at: datetime | None
     shields_notified: int
     shields: list[ShieldStatusInfo]
-    # Encoded polyline for the person's walking route to the convergence point
     person_polyline: str | None = None
+    tracking_url: str | None = None

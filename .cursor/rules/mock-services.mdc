@@ -24,7 +24,7 @@ async def send_emergency_contact_sos(
             f"SOS from {person_name} at https://maps.google.com/?q={lat},{lng}"
         )
         return
-    # real Twilio call below...
+    # real Brevo call below...
 ```
 
 ## Mock Services Reference
@@ -38,7 +38,10 @@ Authorization: Bearer mock-token-{phone_number}
 Extract phone from token directly. Create/return the matching user.
 
 ### MOCK_SMS=true
-Print formatted SMS to stdout with `[MOCK SMS]` prefix. Include all fields that would be sent (recipient, body, maps link).
+All SMS functions print to console with [MOCK SMS] prefix instead of
+calling Brevo. Includes full message body and recipient (last 4 digits only).
+Safe for local dev — no Brevo API key needed.
+To test real delivery: set MOCK_SMS=false and provide a valid BREVO_API_KEY.
 
 ### MOCK_MAPS=true
 Return a realistic fake Directions API response:

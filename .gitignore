@@ -100,6 +100,22 @@ desktop.ini
 .ipynb_checkpoints/
 *.ipynb
 
+# ── Next.js / Frontend ────────────────────────────────────────────────────────
+frontend/.next/
+frontend/out/
+frontend/node_modules/
+frontend/next-env.d.ts
+frontend/.env.local
+frontend/.env.development.local
+frontend/.env.test.local
+frontend/.env.production.local
+frontend/npm-debug.log*
+frontend/yarn-debug.log*
+frontend/yarn-error.log*
+frontend/.pnp/
+frontend/.pnp.js
+frontend/.yarn/install-state.gz
+
 # ── Misc ──────────────────────────────────────────────────────────────────────
 *.bak
 *.tmp

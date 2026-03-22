@@ -8,7 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.config import settings
 from app.database import engine
 from app.redis_client import close_redis, init_redis
-from app.routers import admin, auth, hotspots, incidents, location, shields
+from app.routers import admin, auth, hotspots, incidents, location, shields, tracking
 from app.routers import dev as dev_router
 
 logger = logging.getLogger(__name__)
@@ -60,6 +60,7 @@ app.include_router(incidents.router, prefix="/api/v1/incidents", tags=["incident
 app.include_router(hotspots.router, prefix="/api/v1/hotspots", tags=["hotspots"])
 app.include_router(shields.router, prefix="/api/v1/shields", tags=["shields"])
 app.include_router(admin.router, prefix="/api/v1/admin", tags=["admin"])
+app.include_router(tracking.router, prefix="/api/v1/track", tags=["tracking"])
 
 if settings.is_development:
     app.include_router(dev_router.router, prefix="/api/v1", tags=["dev"])
